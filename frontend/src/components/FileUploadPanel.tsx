@@ -342,6 +342,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
           <h2>文档入库</h2>
           <p>自动分块适合批量测试；手动分块适合检查解析质量和边界。</p>
         </div>
+        <span className="panelBadge">{chunkMode === "auto" ? "Auto Chunk" : "Manual Review"}</span>
       </div>
 
       <div className="segmentedControl" aria-label="分块模式">
@@ -370,9 +371,12 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
           accept=".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,.ppt,.pptx,.xlsx,.html,.htm"
           onChange={handleFilesSelected}
         />
+        <span className="dropIcon" aria-hidden="true">+</span>
+        <span className="dropCopy">
+          <strong>{files.length > 0 ? `${files.length} 个文件待处理` : "拖入或选择文档"}</strong>
+          <small>PDF / DOC / DOCX / PPT / PPTX / XLSX / HTML / MD / TXT / 图片</small>
+        </span>
         <span className="dropAction">选择文件</span>
-        <strong>{files.length > 0 ? `${files.length} 个文件待处理` : "拖入或选择文档"}</strong>
-        <small>PDF / DOC / DOCX / PPT / PPTX / XLSX / HTML / MD / TXT / 图片</small>
       </label>
 
       {files.length > 0 && (
@@ -471,7 +475,10 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
           {manualDocuments.length > 0 && (
             <div className="chunkEditor">
               <div className="chunkSummary">
-                <strong>{manualChunkCount} 个 chunk</strong>
+                <div>
+                  <strong>{manualChunkCount} 个 chunk</strong>
+                  <span>{manualDocuments.length} 个文档已解析</span>
+                </div>
                 <button disabled={busy} onClick={handleManualIngest} type="button">
                   {status === "uploading" ? "写入中" : "确认入库"}
                 </button>

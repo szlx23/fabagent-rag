@@ -6,6 +6,11 @@ import { askQuestion } from "../api/rag";
 import type { AskResponse } from "../types/rag";
 
 const DEFAULT_QUESTION = "这些文档主要包含哪些半导体制造或设备操作信息？";
+const QUICK_PROMPTS = [
+  "总结当前资料的核心内容",
+  "有哪些关键操作步骤？",
+  "列出涉及的参数和限制",
+];
 
 type MarkdownBlockProps = {
   content: string;
@@ -68,6 +73,7 @@ export function AskPanel() {
           <h2>检索问答</h2>
           <p>回答和引用来源分开展示，方便核对依据。</p>
         </div>
+        <span className="panelBadge">Grounded QA</span>
       </div>
 
       <div className="questionBox">
@@ -77,6 +83,20 @@ export function AskPanel() {
           placeholder={DEFAULT_QUESTION}
           rows={4}
         />
+      </div>
+
+      <div className="quickPromptRow" aria-label="常用问题">
+        {QUICK_PROMPTS.map((prompt) => (
+          <button
+            className="promptButton"
+            disabled={loading}
+            key={prompt}
+            onClick={() => setQuestion(prompt)}
+            type="button"
+          >
+            {prompt}
+          </button>
+        ))}
       </div>
 
       <div className="controlRow">
