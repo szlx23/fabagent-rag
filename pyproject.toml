@@ -10,12 +10,17 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1.7",
+    "docling>=2.50.0",
     "fastapi>=0.115.0",
+    "markdown-it-py>=3.0.0",
     "mineru[core]>=3.1.11,<4",
     "openai>=1.54.0",
+    "openpyxl>=3.1.5",
+    "pandas>=2.2.0",
     "pymilvus>=2.6.12,<2.7",
     "python-dotenv>=1.0.1",
     "python-multipart>=0.0.20",
+    "trafilatura>=2.0.0",
     "uvicorn>=0.30.0",
 ]
 

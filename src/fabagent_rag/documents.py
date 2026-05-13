@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 import os
 import shutil
 import subprocess
@@ -6,52 +10,214 @@ import sys
 import tempfile
 
 
-TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
-MINERU_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".pptx", ".xlsx"}
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | MINERU_EXTENSIONS
-
 # MinerU 会生成 Markdown、图片和中间 JSON。这里使用项目内的缓存目录，
 # 并在 .gitignore 中忽略，避免把解析产物提交到仓库。
 MINERU_CACHE_DIR = Path("data/mineru")
 
 
+@dataclass(frozen=True)
+class ParsedDocument:
+    """解析后的统一中间格式。
+
+    当前 RAG 流程只需要 `source` 和 `text`，但保留 `metadata` 是为了后续支持页码、
+    sheet 名、slide 编号等来源信息，而不用改 chunking/embedding 的主流程。
+    """
+
+    source: str
+    text: str
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+class DocumentParser(Protocol):
+    """所有文件解析器的统一接口。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        """把文件解析成统一的 Markdown/text 文档。"""
+
+
+class NativeTextParser:
+    """TXT 这类纯文本文件直接读取，不做格式转换。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        return ParsedDocument(source=source, text=path.read_text(encoding="utf-8"))
+
+
+class MarkdownParser:
+    """Markdown 文件保留原始 Markdown，同时用 parser 做一次语法读取校验。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        text = path.read_text(encoding="utf-8")
+
+        try:
+            from markdown_it import MarkdownIt
+        except ImportError as exc:
+            raise RuntimeError("解析 Markdown 需要安装 markdown-it-py。") from exc
+
+        # 这里不把 Markdown 转 HTML。RAG 检索更适合保留标题、列表、表格等原始标记。
+        MarkdownIt("commonmark", {"html": False}).parse(text)
+        return ParsedDocument(source=source, text=text, metadata={"format": "markdown"})
+
+
+class MinerUParser:
+    """PDF/图片走 MinerU，保留版面解析后的 Markdown。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        return ParsedDocument(
+            source=source,
+            text=parse_with_mineru(path),
+            metadata={"parser": "mineru"},
+        )
+
+
+class DoclingParser:
+    """DOCX/PPTX 走 Docling，输出统一 Markdown。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        try:
+            from docling.document_converter import DocumentConverter
+        except ImportError as exc:
+            raise RuntimeError("解析 DOCX/PPTX 需要安装 docling。") from exc
+
+        result = DocumentConverter().convert(path)
+        return ParsedDocument(
+            source=source,
+            text=result.document.export_to_markdown().strip(),
+            metadata={"parser": "docling"},
+        )
+
+
+class PandasExcelParser:
+    """XLSX 走 pandas，每个 sheet 转成 Markdown 表格后合并。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        try:
+            import pandas as pd
+        except ImportError as exc:
+            raise RuntimeError("解析 XLSX 需要安装 pandas 和 openpyxl。") from exc
+
+        sheets = pd.read_excel(path, sheet_name=None, dtype=str, keep_default_na=False)
+        sections: list[str] = []
+        for sheet_name, frame in sheets.items():
+            sections.append(f"## Sheet: {sheet_name}\n\n{dataframe_to_markdown(frame)}")
+
+        return ParsedDocument(
+            source=source,
+            text="\n\n".join(sections).strip(),
+            metadata={"parser": "pandas", "sheets": ",".join(sheets.keys())},
+        )
+
+
+class HtmlParser:
+    """HTML 先抽取正文内容，再统一转成 Markdown-like 文本。"""
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        try:
+            import trafilatura
+        except ImportError as exc:
+            raise RuntimeError("解析 HTML 需要安装 trafilatura。") from exc
+
+        html = path.read_text(encoding="utf-8", errors="ignore")
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,
+            output_format="markdown",
+        )
+        if not text:
+            raise RuntimeError(f"无法从 HTML 文件解析正文：{path}")
+
+        return ParsedDocument(source=source, text=text.strip(), metadata={"parser": "trafilatura"})
+
+
+PARSERS_BY_EXTENSION: dict[str, DocumentParser] = {
+    ".txt": NativeTextParser(),
+    ".md": MarkdownParser(),
+    ".markdown": MarkdownParser(),
+    ".pdf": MinerUParser(),
+    ".png": MinerUParser(),
+    ".jpg": MinerUParser(),
+    ".jpeg": MinerUParser(),
+    ".docx": DoclingParser(),
+    ".pptx": DoclingParser(),
+    ".xlsx": PandasExcelParser(),
+    ".html": HtmlParser(),
+    ".htm": HtmlParser(),
+}
+
+SUPPORTED_EXTENSIONS = set(PARSERS_BY_EXTENSION)
+
+
 def load_documents(path: Path, pattern: str) -> list[tuple[str, str]]:
     """加载一个文件或目录，返回 `(source, text)` 列表。
 
-    - `source` 会写入 Milvus，后续检索结果靠它告诉用户答案来自哪里。
-    - `text` 是已经可分块的纯文本/Markdown；复杂文档会先交给 MinerU 解析。
+    外部调用仍保持旧接口，内部已变成：文件类型识别 -> 不同 Parser -> 统一中间格式。
     """
 
-    if path.is_file():
-        return [(str(path), load_document_text(path))]
+    parsed_documents = parse_documents(path, pattern)
+    return [(document.source, document.text) for document in parsed_documents]
 
-    documents: list[tuple[str, str]] = []
+
+def parse_documents(path: Path, pattern: str) -> list[ParsedDocument]:
+    """解析文件或目录，返回统一中间格式列表。"""
+
+    if path.is_file():
+        return [parse_document(path, str(path))]
+
+    documents: list[ParsedDocument] = []
     for file_path in sorted(path.glob(pattern)):
         if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            documents.append((str(file_path), load_document_text(file_path)))
+            documents.append(parse_document(file_path, str(file_path)))
     return documents
 
 
 def load_document_text(path: Path) -> str:
     """把单个文档转换为可入库文本。
 
-    简单文本格式直接读取；PDF、图片、Office 文档统一走 MinerU，把版面解析成
-    Markdown，再进入同一套 chunking/embedding 流程。
+    上传接口仍需要这个轻量函数：它先解析成 `ParsedDocument`，再取统一文本字段。
     """
 
+    return parse_document(path, str(path)).text
+
+
+def parse_document(path: Path, source: str) -> ParsedDocument:
+    """根据文件扩展名选择 Parser，并输出统一中间格式。"""
+
     suffix = path.suffix.lower()
-    if suffix in TEXT_EXTENSIONS:
-        return path.read_text(encoding="utf-8")
-    if suffix in MINERU_EXTENSIONS:
-        return parse_with_mineru(path)
-    raise ValueError(f"不支持的文件类型：{path.suffix}")
+    parser = PARSERS_BY_EXTENSION.get(suffix)
+    if not parser:
+        raise ValueError(f"不支持的文件类型：{path.suffix}")
+    return parser.parse(path, source)
+
+
+def dataframe_to_markdown(frame: "object") -> str:
+    """把 pandas DataFrame 转成 Markdown 表格。
+
+    不使用 `DataFrame.to_markdown()`，是为了避免额外依赖 tabulate，并让 Excel 解析
+    只依赖 pandas/openpyxl。
+    """
+
+    columns = [str(column) for column in frame.columns]
+    rows = frame.astype(str).values.tolist()
+    table = [
+        "| " + " | ".join(escape_markdown_cell(column) for column in columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for row in rows:
+        table.append("| " + " | ".join(escape_markdown_cell(cell) for cell in row) + " |")
+    return "\n".join(table)
+
+
+def escape_markdown_cell(value: object) -> str:
+    """转义 Markdown 表格单元格中的竖线和换行。"""
+
+    return str(value).replace("|", "\\|").replace("\n", "<br>")
 
 
 def parse_with_mineru(path: Path) -> str:
-    """调用 MinerU CLI，把复杂文档解析成 Markdown 文本。
+    """调用 MinerU CLI，把 PDF 解析成 Markdown 文本。
 
-    这里没有直接使用 MinerU 的内部 Python API，原因是 CLI 是它最稳定的公开
-    接口之一；代价是每次解析会启动一个临时 mineru-api 服务，速度会慢一些。
+    这里没有直接使用 MinerU 的内部 Python API，原因是 CLI 是它最稳定的公开接口之一；
+    代价是每次解析会启动一个临时 mineru-api 服务，速度会慢一些。
     """
 
     mineru = find_mineru_command()

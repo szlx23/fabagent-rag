@@ -7,7 +7,7 @@
 - 使用 `docker compose` 启动 Milvus standalone 依赖栈
 - 默认使用 Milvus `v2.6.15`
 - 通过 OpenAI 兼容接口调用嵌入模型
-- 通过 MinerU 将 PDF、图片和 Office 文档解析为 Markdown
+- 按文件类型分发到不同 Parser，并统一转换为 Markdown/text 中间格式
 - 提供文档入库和检索问答的 CLI 命令
 - 提供 FastAPI 服务接口
 - 可选接入 OpenAI 生成最终回答
@@ -63,6 +63,22 @@ uvicorn fabagent_rag.api:app --reload
 
 启动后访问 `http://127.0.0.1:8000/docs` 查看接口文档。
 
+7. 启动前端开发服务：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+前端默认通过 `/api` 代理访问 `http://127.0.0.1:8000` 的 FastAPI 服务。
+
+也可以用一键开发脚本同时启动 Milvus、后端和前端：
+
+```bash
+./scripts/dev.sh
+```
+
 前端上传文件可以调用 `POST /ingest/upload`，请求类型为 `multipart/form-data`：
 
 ```bash
@@ -73,6 +89,20 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 如果一次上传多个文件，重复传 `files` 字段即可。服务端会用上传文件名作为检索来源，
 不会把临时解析路径写入 Milvus。
+
+## 文档解析
+
+入库流程会先识别文件类型，再分发到对应 Parser，最后统一输出 Markdown/text，后续
+chunk、embedding、Milvus 写入都复用同一套流程。
+
+| 文件类型 | Parser | 输出 |
+| --- | --- | --- |
+| PDF、PNG、JPG、JPEG | MinerU | Markdown |
+| DOCX、PPTX | Docling | Markdown |
+| XLSX | pandas + openpyxl | Markdown 表格 |
+| TXT | native loader | 原始文本 |
+| MD、Markdown | markdown-it-py | 原始 Markdown |
+| HTML、HTM | trafilatura | Markdown-like 正文 |
 
 ## 配置
 
@@ -98,6 +128,11 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 ```text
 .
 +-- docker-compose.yml
++-- frontend
++   +-- src
++       +-- api
++       +-- components
++       +-- types
 +-- pyproject.toml
 +-- data
 |   +-- raw
@@ -114,6 +149,7 @@ rag ingest data/raw --pattern "**/*.md"
 rag ingest data/raw --pattern "**/*.pdf"
 rag ask "你的问题" --top-k 5
 uvicorn fabagent_rag.api:app --reload
+./scripts/dev.sh
 curl -X POST http://127.0.0.1:8000/ingest/upload -F "files=@data/raw/example.pdf"
 python scripts/reset_milvus.py
 ```
