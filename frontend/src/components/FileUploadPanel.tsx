@@ -1,8 +1,8 @@
 import type { ChangeEvent } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { ingestManualChunks, parseDocuments, uploadDocuments } from "../api/rag";
-import type { IngestResponse, ParsedUploadDocument } from "../types/rag";
+import { getChunkConfig, ingestManualChunks, parseDocuments, uploadDocuments } from "../api/rag";
+import type { ChunkConfig, IngestResponse, ParsedUploadDocument } from "../types/rag";
 
 const SUPPORTED_EXTENSIONS = new Set([
   ".md",
@@ -20,6 +20,12 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".html",
   ".htm",
 ]);
+
+const FALLBACK_CHUNK_CONFIG: ChunkConfig = {
+  chunk_size: 800,
+  chunk_overlap: 120,
+  min_chunk_size: 160,
+};
 
 type FileUploadPanelProps = {
   onIngested: (result: IngestResponse) => void;
@@ -44,8 +50,8 @@ function createChunkId(source: string, index: number) {
   return `${source}-${index}-${crypto.randomUUID()}`;
 }
 
-function createInitialChunks(document: ParsedUploadDocument): ChunkDraft[] {
-  // 手动分块的初始稿只做温和预切分：按 Markdown/文本段落分开，用户再调整边界。
+function createInitialChunks(document: ParsedUploadDocument, config: ChunkConfig): ChunkDraft[] {
+  // 手动分块的初始稿会按用户配置做预切分；用户仍可以继续编辑边界。
   const sections = document.text
     .split(/\n{2,}/)
     .map((section) => section.trim())
@@ -55,15 +61,74 @@ function createInitialChunks(document: ParsedUploadDocument): ChunkDraft[] {
     return [{ id: createChunkId(document.source, 0), text: document.text }];
   }
 
-  return sections.map((section, index) => ({
+  const packedSections = packSectionsByChunkSize(sections, config.chunk_size);
+  const mergedSections = mergeSmallSections(packedSections, config);
+  return mergedSections.map((section, index) => ({
     id: createChunkId(document.source, index),
     text: section,
   }));
 }
 
+function packSectionsByChunkSize(sections: string[], chunkSize: number) {
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const section of sections) {
+    const next = current ? `${current}\n\n${section}` : section;
+    if (next.length <= chunkSize || !current) {
+      current = next;
+      continue;
+    }
+    chunks.push(current);
+    current = section;
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+function mergeSmallSections(sections: string[], config: ChunkConfig) {
+  const chunks: string[] = [];
+  let index = 0;
+
+  while (index < sections.length) {
+    const current = sections[index];
+    if (current.length >= config.min_chunk_size) {
+      chunks.push(current);
+      index += 1;
+      continue;
+    }
+
+    if (chunks.length > 0 && joinChunkText(chunks[chunks.length - 1], current).length <= config.chunk_size) {
+      chunks[chunks.length - 1] = joinChunkText(chunks[chunks.length - 1], current);
+      index += 1;
+      continue;
+    }
+
+    const next = sections[index + 1];
+    if (next && joinChunkText(current, next).length <= config.chunk_size) {
+      chunks.push(joinChunkText(current, next));
+      index += 2;
+      continue;
+    }
+
+    chunks.push(current);
+    index += 1;
+  }
+
+  return chunks;
+}
+
+function joinChunkText(left: string, right: string) {
+  return `${left.trim()}\n\n${right.trim()}`.trim();
+}
+
 export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [chunkMode, setChunkMode] = useState<"auto" | "manual">("auto");
+  const [chunkConfig, setChunkConfig] = useState<ChunkConfig>(FALLBACK_CHUNK_CONFIG);
   const [manualDocuments, setManualDocuments] = useState<ManualDocumentDraft[]>([]);
   const [selectedDocumentIndex, setSelectedDocumentIndex] = useState(0);
   const [status, setStatus] = useState<"idle" | "parsing" | "uploading" | "done" | "error">(
@@ -86,6 +151,20 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
   );
   const busy = status === "parsing" || status === "uploading";
   const canStart = files.length > 0 && unsupportedFiles.length === 0 && !busy;
+  const chunkConfigValid =
+    chunkConfig.chunk_size > 0 &&
+    chunkConfig.chunk_overlap >= 0 &&
+    chunkConfig.min_chunk_size >= 0 &&
+    chunkConfig.chunk_overlap < chunkConfig.chunk_size &&
+    chunkConfig.min_chunk_size <= chunkConfig.chunk_size;
+
+  useEffect(() => {
+    getChunkConfig()
+      .then(setChunkConfig)
+      .catch(() => {
+        setChunkConfig(FALLBACK_CHUNK_CONFIG);
+      });
+  }, []);
 
   function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
@@ -153,10 +232,38 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     );
   }
 
+  function updateChunkConfig(field: keyof ChunkConfig, value: number) {
+    setChunkConfig((currentConfig) => ({
+      ...currentConfig,
+      [field]: Number.isFinite(value) ? value : currentConfig[field],
+    }));
+  }
+
+  function regenerateManualChunks() {
+    setManualDocuments((currentDocuments) =>
+      currentDocuments.map((document) => ({
+        ...document,
+        chunks: createInitialChunks(
+          {
+            source: document.source,
+            text: document.chunks.map((chunk) => chunk.text).join("\n\n"),
+          },
+          chunkConfig,
+        ),
+      })),
+    );
+  }
+
   async function handleAutoUpload() {
-    if (!canStart) {
+    if (!canStart || !chunkConfigValid) {
       setStatus("error");
-      setMessage(files.length === 0 ? "请选择至少一个文件。" : "请先删除不支持的文件。");
+      setMessage(
+        !chunkConfigValid
+          ? "请检查 chunk 参数：overlap 和小 chunk 阈值必须小于 chunk 上限。"
+          : files.length === 0
+            ? "请选择至少一个文件。"
+            : "请先删除不支持的文件。",
+      );
       return;
     }
 
@@ -189,7 +296,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
       setManualDocuments(
         result.documents.map((document) => ({
           source: document.source,
-          chunks: createInitialChunks(document),
+          chunks: createInitialChunks(document, chunkConfig),
         })),
       );
       setSelectedDocumentIndex(0);
@@ -217,7 +324,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     setMessage("正在写入手动确认的 chunk...");
 
     try {
-      const result = await ingestManualChunks(documents);
+      const result = await ingestManualChunks(documents, chunkConfig);
       setStatus("done");
       setMessage(`已写入 ${result.inserted} 个手动 chunk。`);
       onIngested(result);
@@ -305,9 +412,58 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
         </div>
       ) : (
         <div className="manualChunkFlow">
+          <div className="chunkConfigPanel">
+            <label>
+              Chunk 上限
+              <input
+                min={100}
+                step={50}
+                type="number"
+                value={chunkConfig.chunk_size}
+                onChange={(event) => updateChunkConfig("chunk_size", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Overlap
+              <input
+                min={0}
+                step={20}
+                type="number"
+                value={chunkConfig.chunk_overlap}
+                onChange={(event) => updateChunkConfig("chunk_overlap", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              小 chunk 阈值
+              <input
+                min={0}
+                step={20}
+                type="number"
+                value={chunkConfig.min_chunk_size}
+                onChange={(event) => updateChunkConfig("min_chunk_size", Number(event.target.value))}
+              />
+            </label>
+            <button
+              className="secondaryButton"
+              disabled={busy || manualDocuments.length === 0 || !chunkConfigValid}
+              onClick={regenerateManualChunks}
+              type="button"
+            >
+              按配置重分
+            </button>
+          </div>
+          {!chunkConfigValid && (
+            <p className="statusText error">
+              参数无效：Overlap 和小 chunk 阈值不能大于或等于 chunk 上限。
+            </p>
+          )}
           <div className="controlRow">
             <span className="modeHint">先解析预览，再手动编辑 chunk。</span>
-            <button disabled={!canStart} onClick={handleParseForManualChunks} type="button">
+            <button
+              disabled={!canStart || !chunkConfigValid}
+              onClick={handleParseForManualChunks}
+              type="button"
+            >
               {status === "parsing" ? "解析中" : "解析预览"}
             </button>
           </div>

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fabagent_rag.chunking import Chunk, batch, split_text
+from fabagent_rag.chunking import Chunk, ChunkConfig, batch, merge_small_text_chunks, split_text
 from fabagent_rag.config import Settings
 from fabagent_rag.documents import load_documents
 from fabagent_rag.embeddings import EmbeddingModel
@@ -32,6 +32,21 @@ def build_store(settings: Settings, dimension: int) -> MilvusStore:
 DEFAULT_EMBEDDING_BATCH_SIZE = 10
 
 
+def build_chunk_config(
+    settings: Settings,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
+    min_chunk_size: int | None = None,
+) -> ChunkConfig:
+    """合并默认配置和请求级覆盖配置。"""
+
+    return ChunkConfig(
+        chunk_size=chunk_size if chunk_size is not None else settings.chunk_size,
+        chunk_overlap=chunk_overlap if chunk_overlap is not None else settings.chunk_overlap,
+        min_chunk_size=min_chunk_size if min_chunk_size is not None else settings.min_chunk_size,
+    )
+
+
 def ingest_path(settings: Settings, path: Path, pattern: str, batch_size: int) -> dict[str, int]:
     """完整入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
 
@@ -42,6 +57,7 @@ def ingest_documents(
     settings: Settings,
     documents: list[tuple[str, str]],
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+    chunk_config: ChunkConfig | None = None,
 ) -> dict[str, int]:
     """把已经解析好的文档文本写入 Milvus。
 
@@ -53,7 +69,7 @@ def ingest_documents(
     chunks = [
         chunk
         for source, text in documents
-        for chunk in split_text(text, source, settings.chunk_size, settings.chunk_overlap)
+        for chunk in split_text(text, source, chunk_config or build_chunk_config(settings))
     ]
     return ingest_chunks(settings, chunks, batch_size=batch_size, document_count=len(documents))
 
@@ -62,18 +78,22 @@ def ingest_manual_chunks(
     settings: Settings,
     documents: list[tuple[str, list[str]]],
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+    chunk_config: ChunkConfig | None = None,
 ) -> dict[str, int]:
     """把前端人工确认过的 chunk 写入 Milvus。
 
     手动分块模式下，chunk 边界由用户在前端决定；后端只过滤空文本并重新编号。
     """
 
-    chunks = [
-        Chunk(text=text.strip(), source=source, index=index)
-        for source, texts in documents
-        for index, text in enumerate(texts)
-        if text.strip()
-    ]
+    config = chunk_config or build_chunk_config(settings)
+    chunks = []
+    for source, texts in documents:
+        merged_texts = merge_small_text_chunks(texts, config)
+        chunks.extend(
+            Chunk(text=text.strip(), source=source, index=index)
+            for index, text in enumerate(merged_texts)
+            if text.strip()
+        )
     return ingest_chunks(settings, chunks, batch_size=batch_size, document_count=len(documents))
 
 

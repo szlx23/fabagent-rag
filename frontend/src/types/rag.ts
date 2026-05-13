@@ -14,6 +14,12 @@ export type ParseUploadResponse = {
   documents: ParsedUploadDocument[];
 };
 
+export type ChunkConfig = {
+  chunk_size: number;
+  chunk_overlap: number;
+  min_chunk_size: number;
+};
+
 export type AskResponse = {
   question: string;
   answer: string;

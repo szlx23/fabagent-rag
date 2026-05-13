@@ -432,6 +432,28 @@ button:disabled {
   gap: 14px;
 }
 
+.chunkConfigPanel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
+  gap: 10px;
+  align-items: end;
+  border: 1px solid #dbe2e6;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.chunkConfigPanel label {
+  display: grid;
+  gap: 6px;
+  color: #43525b;
+  font-size: 13px;
+}
+
+.chunkConfigPanel input {
+  width: 100%;
+}
+
 .chunkEditor {
   display: grid;
   gap: 12px;
@@ -746,6 +768,10 @@ button:disabled {
   .controlRow {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .chunkConfigPanel {
+    grid-template-columns: 1fr;
   }
 
   .controlRow input,

@@ -10,6 +10,7 @@ from fabagent_rag.config import load_settings
 from fabagent_rag.documents import load_document_text
 from fabagent_rag.rag_service import (
     answer_question,
+    build_chunk_config,
     ingest_documents,
     ingest_manual_chunks,
     ingest_path,
@@ -54,8 +55,21 @@ class ManualChunkDocument(BaseModel):
     chunks: list[str] = Field(..., min_length=1, description="人工确认后的 chunk 文本")
 
 
+class ChunkConfigRequest(BaseModel):
+    chunk_size: int | None = Field(default=None, ge=1, description="chunk 最大字符数")
+    chunk_overlap: int | None = Field(default=None, ge=0, description="自动分块重叠字符数")
+    min_chunk_size: int | None = Field(default=None, ge=0, description="小 chunk 合并阈值")
+
+
 class ManualChunkIngestRequest(BaseModel):
     documents: list[ManualChunkDocument] = Field(..., min_length=1)
+    chunk_config: ChunkConfigRequest | None = None
+
+
+class ChunkConfigResponse(BaseModel):
+    chunk_size: int
+    chunk_overlap: int
+    min_chunk_size: int
 
 
 class AskRequest(BaseModel):
@@ -74,6 +88,18 @@ class AskResponse(BaseModel):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/chunk-config", response_model=ChunkConfigResponse)
+def chunk_config() -> dict[str, int]:
+    """返回前端手动分块使用的默认参数。"""
+
+    config = build_chunk_config(load_settings())
+    return {
+        "chunk_size": config.chunk_size,
+        "chunk_overlap": config.chunk_overlap,
+        "min_chunk_size": config.min_chunk_size,
+    }
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -129,7 +155,14 @@ def ingest_chunks(request: ManualChunkIngestRequest) -> dict[str, object]:
 
     documents = [(document.source, document.chunks) for document in request.documents]
     settings = load_settings()
-    result = ingest_manual_chunks(settings, documents)
+    request_config = request.chunk_config
+    chunk_config = build_chunk_config(
+        settings,
+        chunk_size=request_config.chunk_size if request_config else None,
+        chunk_overlap=request_config.chunk_overlap if request_config else None,
+        min_chunk_size=request_config.min_chunk_size if request_config else None,
+    )
+    result = ingest_manual_chunks(settings, documents, chunk_config=chunk_config)
     return {**result, "sources": [source for source, _ in documents]}
 
 

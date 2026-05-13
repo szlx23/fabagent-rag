@@ -1,4 +1,4 @@
-import type { AskResponse, IngestResponse, ParseUploadResponse } from "../types/rag";
+import type { AskResponse, ChunkConfig, IngestResponse, ParseUploadResponse } from "../types/rag";
 
 const API_PREFIX = "/api";
 
@@ -37,15 +37,21 @@ export async function parseDocuments(files: File[]): Promise<ParseUploadResponse
 
 export async function ingestManualChunks(
   documents: Array<{ source: string; chunks: string[] }>,
+  chunkConfig: ChunkConfig,
 ): Promise<IngestResponse> {
   const response = await fetch(`${API_PREFIX}/ingest/chunks`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ documents }),
+    body: JSON.stringify({ documents, chunk_config: chunkConfig }),
   });
   return readJson<IngestResponse>(response);
+}
+
+export async function getChunkConfig(): Promise<ChunkConfig> {
+  const response = await fetch(`${API_PREFIX}/chunk-config`);
+  return readJson<ChunkConfig>(response);
 }
 
 export async function askQuestion(question: string, topK: number): Promise<AskResponse> {

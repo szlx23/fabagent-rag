@@ -120,6 +120,7 @@ chunk、embedding、Milvus 写入都复用同一套流程。
 | `MINERU_MODEL_SOURCE` | `modelscope` | MinerU 模型下载源；国内环境建议使用 `modelscope` |
 | `CHUNK_SIZE` | `800` | 文档分块字符数 |
 | `CHUNK_OVERLAP` | `120` | 文档分块重叠字符数 |
+| `MIN_CHUNK_SIZE` | `160` | 小 chunk 阈值；低于该值时会尝试与前后 chunk 合并 |
 | `INFERENCE_API_KEY` | 空 | 推理模型 API Key；未配置时会读取 `ARK_API_KEY` |
 | `INFERENCE_BASE_URL` | 空 | 推理模型 OpenAI 兼容接口地址 |
 | `INFERENCE_MODEL` | 空 | 推理模型名称 |

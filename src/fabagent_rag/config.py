@@ -24,6 +24,7 @@ class Settings:
     embedding_model: str
     chunk_size: int
     chunk_overlap: int
+    min_chunk_size: int
     inference_api_key: str
     inference_base_url: str
     inference_model: str
@@ -58,6 +59,7 @@ def load_settings() -> Settings:
         ),
         chunk_size=int(os.getenv("CHUNK_SIZE", "800")),
         chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "120")),
+        min_chunk_size=int(os.getenv("MIN_CHUNK_SIZE", "160")),
         inference_api_key=os.getenv("ARK_API_KEY", ""),
         inference_base_url=os.getenv("ARK_CODING_PLAN_BASE_URL", ""),
         inference_model=os.getenv("INFERENCE_MODEL", ""),

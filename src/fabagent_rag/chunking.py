@@ -11,7 +11,20 @@ class Chunk:
     index: int
 
 
-def split_text(text: str, source: str, chunk_size: int, chunk_overlap: int) -> list[Chunk]:
+@dataclass(frozen=True)
+class ChunkConfig:
+    """分块策略配置。
+
+    `min_chunk_size` 用来定义“小 chunk”：切分后如果某个 chunk 太短，会优先尝试
+    和前后 chunk 合并，只要合并后不超过 `chunk_size`。
+    """
+
+    chunk_size: int
+    chunk_overlap: int
+    min_chunk_size: int
+
+
+def split_text(text: str, source: str, config: ChunkConfig) -> list[Chunk]:
     """把文档文本切成适合 embedding 的分块。
 
     RAG 检索不是按完整文档查，而是按 chunk 查。chunk 太大时语义会变稀释，
@@ -22,12 +35,13 @@ def split_text(text: str, source: str, chunk_size: int, chunk_overlap: int) -> l
     if not clean_text:
         return []
 
-    if chunk_overlap >= chunk_size:
-        raise ValueError("chunk_overlap 必须小于 chunk_size")
+    validate_chunk_config(config)
 
-    chunks: list[Chunk] = []
+    chunk_size = config.chunk_size
+    chunk_overlap = config.chunk_overlap
+
+    raw_chunks: list[str] = []
     start = 0
-    index = 0
 
     while start < len(clean_text):
         end = min(start + chunk_size, len(clean_text))
@@ -43,14 +57,78 @@ def split_text(text: str, source: str, chunk_size: int, chunk_overlap: int) -> l
                 end = start + break_at + 1
                 window = clean_text[start:end]
 
-        chunks.append(Chunk(text=window.strip(), source=source, index=index))
-        index += 1
+        raw_chunks.append(window.strip())
 
         if end >= len(clean_text):
             break
         start = max(0, end - chunk_overlap)
 
-    return chunks
+    merged_chunks = merge_small_text_chunks(raw_chunks, config)
+    return [
+        Chunk(text=chunk_text, source=source, index=index)
+        for index, chunk_text in enumerate(merged_chunks)
+    ]
+
+
+def validate_chunk_config(config: ChunkConfig) -> None:
+    """校验分块参数，避免运行时出现无限循环或不可达的合并策略。"""
+
+    if config.chunk_size <= 0:
+        raise ValueError("chunk_size 必须大于 0")
+    if config.chunk_overlap < 0:
+        raise ValueError("chunk_overlap 不能小于 0")
+    if config.min_chunk_size < 0:
+        raise ValueError("min_chunk_size 不能小于 0")
+    if config.chunk_overlap >= config.chunk_size:
+        raise ValueError("chunk_overlap 必须小于 chunk_size")
+    if config.min_chunk_size > config.chunk_size:
+        raise ValueError("min_chunk_size 不能大于 chunk_size")
+
+
+def merge_small_text_chunks(chunks: list[str], config: ChunkConfig) -> list[str]:
+    """合并过短 chunk，尽量减少没有独立语义的小片段。
+
+    合并方向优先向前，因为前一个 chunk 通常是当前短片段的上文；如果向前会超长，
+    再尝试和后一个 chunk 合并。
+    """
+
+    validate_chunk_config(config)
+    normalized = [chunk.strip() for chunk in chunks if chunk.strip()]
+    if config.min_chunk_size == 0 or len(normalized) <= 1:
+        return normalized
+
+    merged: list[str] = []
+    index = 0
+    while index < len(normalized):
+        current = normalized[index]
+
+        if len(current) >= config.min_chunk_size:
+            merged.append(current)
+            index += 1
+            continue
+
+        if merged and can_merge(merged[-1], current, config.chunk_size):
+            merged[-1] = join_chunks(merged[-1], current)
+            index += 1
+            continue
+
+        if index + 1 < len(normalized) and can_merge(current, normalized[index + 1], config.chunk_size):
+            merged.append(join_chunks(current, normalized[index + 1]))
+            index += 2
+            continue
+
+        merged.append(current)
+        index += 1
+
+    return merged
+
+
+def can_merge(left: str, right: str, chunk_size: int) -> bool:
+    return len(join_chunks(left, right)) <= chunk_size
+
+
+def join_chunks(left: str, right: str) -> str:
+    return f"{left.rstrip()}\n\n{right.lstrip()}".strip()
 
 
 def batch(items: list[Chunk], size: int) -> Iterable[list[Chunk]]:
