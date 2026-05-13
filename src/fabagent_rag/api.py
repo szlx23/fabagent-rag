@@ -3,12 +3,17 @@ from typing import Annotated
 import shutil
 import tempfile
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from fabagent_rag.config import load_settings
 from fabagent_rag.documents import load_document_text
-from fabagent_rag.rag_service import answer_question, ingest_documents, ingest_path
+from fabagent_rag.rag_service import (
+    answer_question,
+    ingest_documents,
+    ingest_manual_chunks,
+    ingest_path,
+)
 
 app = FastAPI(title="fabagent-rag", version="0.1.0")
 
@@ -33,6 +38,24 @@ class IngestResponse(BaseModel):
     chunks: int
     inserted: int
     sources: list[str] = Field(default_factory=list)
+
+
+class ParsedUploadDocument(BaseModel):
+    source: str
+    text: str
+
+
+class ParseUploadResponse(BaseModel):
+    documents: list[ParsedUploadDocument]
+
+
+class ManualChunkDocument(BaseModel):
+    source: str = Field(..., min_length=1, description="chunk 来源文件名")
+    chunks: list[str] = Field(..., min_length=1, description="人工确认后的 chunk 文本")
+
+
+class ManualChunkIngestRequest(BaseModel):
+    documents: list[ManualChunkDocument] = Field(..., min_length=1)
 
 
 class AskRequest(BaseModel):
@@ -69,13 +92,57 @@ def ingest(request: IngestRequest) -> dict[str, object]:
 @app.post("/ingest/upload", response_model=IngestResponse)
 def ingest_upload(
     files: Annotated[list[UploadFile], File(description="要上传并入库的文档文件")],
-    batch_size: Annotated[int, Form(ge=1, le=100)] = 10,
 ) -> dict[str, object]:
     """接收前端上传文件，解析后直接入库。
 
     FastAPI 的 `UploadFile` 是流式临时文件；MinerU 需要真实文件路径，所以这里先
     写入项目临时目录，并保留文件后缀，保证 PDF/Office/图片能按类型解析。
     """
+
+    documents = parse_uploaded_files(files)
+    settings = load_settings()
+    result = ingest_documents(settings, documents)
+    return {**result, "sources": [source for source, _ in documents]}
+
+
+@app.post("/parse/upload", response_model=ParseUploadResponse)
+def parse_upload(
+    files: Annotated[list[UploadFile], File(description="要上传并解析预览的文档文件")],
+) -> dict[str, object]:
+    """只解析上传文件，不写入 Milvus。
+
+    手动分块需要先让前端拿到统一文本，再由用户决定 chunk 边界。
+    """
+
+    documents = parse_uploaded_files(files)
+    return {
+        "documents": [
+            {"source": source, "text": text}
+            for source, text in documents
+        ]
+    }
+
+
+@app.post("/ingest/chunks", response_model=IngestResponse)
+def ingest_chunks(request: ManualChunkIngestRequest) -> dict[str, object]:
+    """写入前端人工分好的 chunk。"""
+
+    documents = [(document.source, document.chunks) for document in request.documents]
+    settings = load_settings()
+    result = ingest_manual_chunks(settings, documents)
+    return {**result, "sources": [source for source, _ in documents]}
+
+
+@app.post("/ask", response_model=AskResponse)
+def ask(request: AskRequest) -> dict[str, object]:
+    """查询已入库文档并返回答案和召回上下文。"""
+
+    settings = load_settings()
+    return answer_question(settings, request.question, request.top_k)
+
+
+def parse_uploaded_files(files: list[UploadFile]) -> list[tuple[str, str]]:
+    """把上传文件保存到临时目录后解析成统一文本。"""
 
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件。")
@@ -102,14 +169,4 @@ def ingest_upload(
             finally:
                 upload.file.close()
 
-    settings = load_settings()
-    result = ingest_documents(settings, documents, batch_size)
-    return {**result, "sources": [source for source, _ in documents]}
-
-
-@app.post("/ask", response_model=AskResponse)
-def ask(request: AskRequest) -> dict[str, object]:
-    """查询已入库文档并返回答案和召回上下文。"""
-
-    settings = load_settings()
-    return answer_question(settings, request.question, request.top_k)
+    return documents

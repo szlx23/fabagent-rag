@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import { askQuestion } from "../api/rag";
 import type { AskResponse } from "../types/rag";
 
+const DEFAULT_QUESTION = "这些文档主要包含哪些半导体制造或设备操作信息？";
+
 type MarkdownBlockProps = {
   content: string;
   variant?: "answer" | "context";
@@ -27,7 +29,7 @@ function getContextPreview(text: unknown) {
 }
 
 export function AskPanel() {
-  const [question, setQuestion] = useState("OPC有哪些类型？");
+  const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(3);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -35,7 +37,8 @@ export function AskPanel() {
   const [selectedContextIndex, setSelectedContextIndex] = useState(0);
 
   async function handleAsk() {
-    if (!question.trim()) {
+    const finalQuestion = question.trim() || DEFAULT_QUESTION;
+    if (!finalQuestion) {
       setError("请输入问题。");
       return;
     }
@@ -44,7 +47,7 @@ export function AskPanel() {
     setError("");
 
     try {
-      const response = await askQuestion(question.trim(), topK);
+      const response = await askQuestion(finalQuestion, topK);
       setResult(response);
       setSelectedContextIndex(0);
     } catch (caught) {
@@ -61,16 +64,20 @@ export function AskPanel() {
     <section className="panel answerPanel">
       <div className="panelHeader">
         <div>
+          <span className="panelLabel">Retrieval</span>
           <h2>检索问答</h2>
-          <p>输入问题，查看模型回答和召回片段。</p>
+          <p>回答和引用来源分开展示，方便核对依据。</p>
         </div>
       </div>
 
-      <textarea
-        value={question}
-        onChange={(event) => setQuestion(event.target.value)}
-        rows={4}
-      />
+      <div className="questionBox">
+        <textarea
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          placeholder={DEFAULT_QUESTION}
+          rows={4}
+        />
+      </div>
 
       <div className="controlRow">
         <label>
@@ -120,6 +127,7 @@ export function AskPanel() {
                           <small>{context.score.toFixed(4)}</small>
                         )}
                       </span>
+                      <span className="contextSourceIndex">来源 {index + 1}</span>
                       <span className="contextPreview">{getContextPreview(context.text)}</span>
                     </button>
                   );

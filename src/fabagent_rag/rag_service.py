@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fabagent_rag.chunking import batch, split_text
+from fabagent_rag.chunking import Chunk, batch, split_text
 from fabagent_rag.config import Settings
 from fabagent_rag.documents import load_documents
 from fabagent_rag.embeddings import EmbeddingModel
@@ -29,16 +29,19 @@ def build_store(settings: Settings, dimension: int) -> MilvusStore:
     )
 
 
+DEFAULT_EMBEDDING_BATCH_SIZE = 10
+
+
 def ingest_path(settings: Settings, path: Path, pattern: str, batch_size: int) -> dict[str, int]:
     """完整入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
 
-    return ingest_documents(settings, load_documents(path, pattern), batch_size)
+    return ingest_documents(settings, load_documents(path, pattern), batch_size=batch_size)
 
 
 def ingest_documents(
     settings: Settings,
     documents: list[tuple[str, str]],
-    batch_size: int,
+    batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
 ) -> dict[str, int]:
     """把已经解析好的文档文本写入 Milvus。
 
@@ -46,15 +49,44 @@ def ingest_documents(
     这样前端上传文件后，检索结果不会暴露服务端临时文件路径。
     """
 
-    embedder = build_embedder(settings)
-    store = build_store(settings, embedder.dimension)
-
     # 到这里时，MinerU 已经把复杂文档转换成 Markdown；后续流程统一处理文本。
     chunks = [
         chunk
         for source, text in documents
         for chunk in split_text(text, source, settings.chunk_size, settings.chunk_overlap)
     ]
+    return ingest_chunks(settings, chunks, batch_size=batch_size, document_count=len(documents))
+
+
+def ingest_manual_chunks(
+    settings: Settings,
+    documents: list[tuple[str, list[str]]],
+    batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+) -> dict[str, int]:
+    """把前端人工确认过的 chunk 写入 Milvus。
+
+    手动分块模式下，chunk 边界由用户在前端决定；后端只过滤空文本并重新编号。
+    """
+
+    chunks = [
+        Chunk(text=text.strip(), source=source, index=index)
+        for source, texts in documents
+        for index, text in enumerate(texts)
+        if text.strip()
+    ]
+    return ingest_chunks(settings, chunks, batch_size=batch_size, document_count=len(documents))
+
+
+def ingest_chunks(
+    settings: Settings,
+    chunks: list[Chunk],
+    batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+    document_count: int = 0,
+) -> dict[str, int]:
+    """统一的 chunk 入库流程，自动分块和手动分块都会走这里。"""
+
+    embedder = build_embedder(settings)
+    store = build_store(settings, embedder.dimension)
 
     inserted = 0
     for chunk_batch in batch(chunks, batch_size):
@@ -62,7 +94,7 @@ def ingest_documents(
         inserted += store.insert(chunk_batch, embeddings)
 
     return {
-        "documents": len(documents),
+        "documents": document_count,
         "chunks": len(chunks),
         "inserted": inserted,
     }

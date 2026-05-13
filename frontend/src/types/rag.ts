@@ -5,6 +5,15 @@ export type IngestResponse = {
   sources: string[];
 };
 
+export type ParsedUploadDocument = {
+  source: string;
+  text: string;
+};
+
+export type ParseUploadResponse = {
+  documents: ParsedUploadDocument[];
+};
+
 export type AskResponse = {
   question: string;
   answer: string;

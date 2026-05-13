@@ -99,6 +99,7 @@ chunk、embedding、Milvus 写入都复用同一套流程。
 | --- | --- | --- |
 | PDF、PNG、JPG、JPEG | MinerU | Markdown |
 | DOCX、PPTX | Docling | Markdown |
+| DOC、PPT | LibreOffice 转换后交给 Docling | Markdown |
 | XLSX | pandas + openpyxl | Markdown 表格 |
 | TXT | native loader | 原始文本 |
 | MD、Markdown | markdown-it-py | 原始 Markdown |

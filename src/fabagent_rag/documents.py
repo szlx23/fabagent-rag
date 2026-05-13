@@ -86,6 +86,27 @@ class DoclingParser:
         )
 
 
+class LegacyOfficeParser:
+    """DOC/PPT 先转成新 Office 格式，再复用 Docling。
+
+    Docling 当前直接支持 docx/pptx，没有把老式二进制 doc/ppt 列为输入格式。
+    这里用 LibreOffice 做一次本地转换，让用户收集到的兼容格式也能进入同一解析链路。
+    """
+
+    def parse(self, path: Path, source: str) -> ParsedDocument:
+        target_extension = ".docx" if path.suffix.lower() == ".doc" else ".pptx"
+        converted_path = convert_legacy_office(path, target_extension)
+        try:
+            parsed = DoclingParser().parse(converted_path, source)
+        finally:
+            converted_path.unlink(missing_ok=True)
+        return ParsedDocument(
+            source=parsed.source,
+            text=parsed.text,
+            metadata={**parsed.metadata, "conversion": "libreoffice"},
+        )
+
+
 class PandasExcelParser:
     """XLSX 走 pandas，每个 sheet 转成 Markdown 表格后合并。"""
 
@@ -137,7 +158,9 @@ PARSERS_BY_EXTENSION: dict[str, DocumentParser] = {
     ".png": MinerUParser(),
     ".jpg": MinerUParser(),
     ".jpeg": MinerUParser(),
+    ".doc": LegacyOfficeParser(),
     ".docx": DoclingParser(),
+    ".ppt": LegacyOfficeParser(),
     ".pptx": DoclingParser(),
     ".xlsx": PandasExcelParser(),
     ".html": HtmlParser(),
@@ -165,7 +188,11 @@ def parse_documents(path: Path, pattern: str) -> list[ParsedDocument]:
 
     documents: list[ParsedDocument] = []
     for file_path in sorted(path.glob(pattern)):
-        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
+        if (
+            file_path.is_file()
+            and not file_path.name.startswith("exclude__")
+            and file_path.suffix.lower() in SUPPORTED_EXTENSIONS
+        ):
             documents.append(parse_document(file_path, str(file_path)))
     return documents
 
@@ -211,6 +238,47 @@ def escape_markdown_cell(value: object) -> str:
     """转义 Markdown 表格单元格中的竖线和换行。"""
 
     return str(value).replace("|", "\\|").replace("\n", "<br>")
+
+
+def convert_legacy_office(path: Path, target_extension: str) -> Path:
+    """用 LibreOffice 把 doc/ppt 转为 docx/pptx 临时文件。"""
+
+    office = find_office_converter()
+    if not office:
+        raise RuntimeError("解析 DOC/PPT 需要安装 LibreOffice 或 soffice。")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_dir = Path(temp_dir)
+        subprocess.run(
+            [
+                office,
+                "--headless",
+                "--convert-to",
+                target_extension.lstrip("."),
+                "--outdir",
+                str(output_dir),
+                str(path),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        converted_files = sorted(output_dir.glob(f"*{target_extension}"))
+        if not converted_files:
+            raise RuntimeError(f"LibreOffice 未能把 {path} 转换为 {target_extension}。")
+
+        # TemporaryDirectory 会清理目录，所以复制到另一个临时文件供 Docling 读取。
+        stable_file = tempfile.NamedTemporaryFile(suffix=target_extension, delete=False)
+        stable_file.close()
+        shutil.copyfile(converted_files[0], stable_file.name)
+        return Path(stable_file.name)
+
+
+def find_office_converter() -> str | None:
+    """查找 LibreOffice/soffice 命令。"""
+
+    return shutil.which("libreoffice") or shutil.which("soffice")
 
 
 def parse_with_mineru(path: Path) -> str:

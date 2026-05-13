@@ -10,19 +10,41 @@ function App() {
   return (
     <main className="appShell">
       <header className="topBar">
-        <div>
-          <h1>fabagent RAG</h1>
-          <p>文档上传、解析入库和检索问答。</p>
+        <div className="brandBlock">
+          <span className="eyebrow">FabAgent Workspace</span>
+          <h1>RAG 文档工作台</h1>
+          <p>上传资料、建立索引、围绕来源追问。</p>
         </div>
-        <div className="serviceBadge">FastAPI / Milvus / MinerU</div>
+        <div className="topStats" aria-label="服务模块">
+          <div>
+            <span>API</span>
+            <strong>FastAPI</strong>
+          </div>
+          <div>
+            <span>Vector DB</span>
+            <strong>Milvus</strong>
+          </div>
+          <div>
+            <span>Parser</span>
+            <strong>MinerU+</strong>
+          </div>
+        </div>
       </header>
 
       {lastIngest && (
         <section className="summaryStrip">
-          <strong>最近入库</strong>
-          <span>{lastIngest.documents} 个文档</span>
-          <span>{lastIngest.inserted} 个分块</span>
-          <span>{lastIngest.sources.join("，")}</span>
+          <div>
+            <span>最近入库</span>
+            <strong>{lastIngest.documents} 个文档</strong>
+          </div>
+          <div>
+            <span>写入分块</span>
+            <strong>{lastIngest.inserted}</strong>
+          </div>
+          <div className="summarySources">
+            <span>来源</span>
+            <strong>{lastIngest.sources.join("，")}</strong>
+          </div>
         </section>
       )}
 
