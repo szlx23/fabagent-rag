@@ -9,6 +9,8 @@ from fabagent_rag.milvus_store import MilvusStore
 
 
 def build_embedder(settings: Settings) -> EmbeddingModel:
+    """根据配置创建 embedding 客户端。"""
+
     return EmbeddingModel(
         settings.embedding_model,
         settings.embedding_api_key,
@@ -17,6 +19,8 @@ def build_embedder(settings: Settings) -> EmbeddingModel:
 
 
 def build_store(settings: Settings, dimension: int) -> MilvusStore:
+    """根据配置创建 Milvus 访问对象。"""
+
     return MilvusStore(
         settings.milvus_host,
         settings.milvus_port,
@@ -26,10 +30,13 @@ def build_store(settings: Settings, dimension: int) -> MilvusStore:
 
 
 def ingest_path(settings: Settings, path: Path, pattern: str, batch_size: int) -> dict[str, int]:
+    """完整入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
+
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
 
     documents = load_documents(path, pattern)
+    # 到这里时，MinerU 已经把复杂文档转换成 Markdown；后续流程统一处理文本。
     chunks = [
         chunk
         for source, text in documents
@@ -49,6 +56,8 @@ def ingest_path(settings: Settings, path: Path, pattern: str, batch_size: int) -
 
 
 def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, object]:
+    """完整问答流程：问题向量化 -> Milvus 召回 -> LLM 生成/降级返回上下文。"""
+
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
     query_embedding = embedder.encode([question])[0]

@@ -4,6 +4,8 @@ import sys
 import click
 
 if __package__ in {None, ""}:
+    # 允许 `python src/fabagent_rag/cli.py` 这种直接运行方式。
+    # 正式使用仍推荐 `pip install -e .` 后执行 `rag ...`。
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fabagent_rag.config import load_settings
@@ -22,6 +24,7 @@ def main() -> None:
 def ingest(path: Path, pattern: str, batch_size: int) -> None:
     """将文本文件写入 Milvus。"""
     settings = load_settings()
+    # CLI 只负责参数解析和输出；真正业务流程在 rag_service 中，FastAPI 也复用它。
     result = ingest_path(settings, path, pattern, batch_size)
     click.echo(f"已从 {result['documents']} 个文档写入 {result['inserted']} 个分块。")
 

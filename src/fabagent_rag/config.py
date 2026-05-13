@@ -9,6 +9,13 @@ _MILVUS_COLLECTION_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
 @dataclass(frozen=True)
 class Settings:
+    """运行时配置的快照。
+
+    项目所有入口（CLI 和 FastAPI）都会先调用 `load_settings()`，再把这个对象
+    传给服务层。这样可以避免业务代码到处直接读取环境变量，review 时只需要从
+    这里理解“系统有哪些外部依赖”。
+    """
+
     milvus_host: str
     milvus_port: str
     milvus_collection: str
@@ -23,9 +30,17 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    """从 `.env` 和系统环境变量加载配置。
+
+    注意：当前项目把豆包/火山方舟的 API key 同时用于 embedding 和推理。
+    如果后续要拆分成不同账号或不同网关，只需要扩展这里的字段读取逻辑。
+    """
+
     load_dotenv()
     milvus_collection = os.getenv("MILVUS_COLLECTION", "rag_documents")
     if not _MILVUS_COLLECTION_PATTERN.fullmatch(milvus_collection):
+        # Milvus collection 名称不能包含短横线等字符。提前校验可以避免
+        # PyMilvus 抛出很长的底层异常，定位起来更直接。
         raise ValueError(
             "MILVUS_COLLECTION 只能包含数字、字母和下划线，"
             f"当前值为 {milvus_collection!r}"

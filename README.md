@@ -7,6 +7,7 @@
 - 使用 `docker compose` 启动 Milvus standalone 依赖栈
 - 默认使用 Milvus `v2.6.15`
 - 通过 OpenAI 兼容接口调用嵌入模型
+- 通过 MinerU 将 PDF、图片和 Office 文档解析为 Markdown
 - 提供文档入库和检索问答的 CLI 命令
 - 提供 FastAPI 服务接口
 - 可选接入 OpenAI 生成最终回答
@@ -19,6 +20,13 @@
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
+```
+
+CPU-only 机器建议先安装 CPU 版 PyTorch，再安装 MinerU：
+
+```bash
+pip install "torch==2.6.0+cpu" "torchvision==0.21.0+cpu" --index-url https://download.pytorch.org/whl/cpu
+pip install "mineru[core]==3.1.11" -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
 ```
 
 2. 启动 Milvus：
@@ -67,6 +75,7 @@ uvicorn fabagent_rag.api:app --reload
 | `EMBEDDING_API_KEY` | 空 | 嵌入模型 API Key；未配置时会读取 `ARK_API_KEY` |
 | `EMBEDDING_BASE_URL` | 空 | 嵌入模型 OpenAI 兼容接口地址 |
 | `EMBEDDING_MODEL` | `doubao-embedding-text-240715` | 嵌入模型名称 |
+| `MINERU_MODEL_SOURCE` | `modelscope` | MinerU 模型下载源；国内环境建议使用 `modelscope` |
 | `CHUNK_SIZE` | `800` | 文档分块字符数 |
 | `CHUNK_OVERLAP` | `120` | 文档分块重叠字符数 |
 | `INFERENCE_API_KEY` | 空 | 推理模型 API Key；未配置时会读取 `ARK_API_KEY` |
@@ -91,6 +100,7 @@ uvicorn fabagent_rag.api:app --reload
 
 ```bash
 rag ingest data/raw --pattern "**/*.md"
+rag ingest data/raw --pattern "**/*.pdf"
 rag ask "你的问题" --top-k 5
 uvicorn fabagent_rag.api:app --reload
 python scripts/reset_milvus.py

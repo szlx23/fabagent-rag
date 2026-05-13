@@ -9,6 +9,12 @@ def build_answer(
     base_url: str,
     model: str,
 ) -> str:
+    """基于检索上下文生成最终回答。
+
+    推理模型是可选能力：如果没有配置，或者接口失败，就返回检索上下文本身。
+    这样 RAG 的“检索”能力和“生成”能力可以独立排障。
+    """
+
     if not api_key or not base_url or not model:
         return format_contexts(contexts)
 
@@ -38,6 +44,8 @@ def build_answer(
     except OpenAIError as exc:
         return format_contexts(contexts, f"推理模型调用失败：{exc}")
 
+    # 一些 OpenAI 兼容接口会返回 HTTP 200 但 choices 为空。这里显式兜底，
+    # 避免用户只看到 IndexError，而看不到已经检索到的上下文。
     if not response.choices:
         return format_contexts(contexts, "推理模型没有返回回答内容：choices 为空")
 
@@ -49,6 +57,8 @@ def build_answer(
 
 
 def format_contexts(contexts: list[dict[str, object]], reason: str | None = None) -> str:
+    """把检索结果格式化成人类可读文本，作为无生成模型时的降级输出。"""
+
     if not contexts:
         return "没有找到匹配的上下文。"
 
