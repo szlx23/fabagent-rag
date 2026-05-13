@@ -32,10 +32,23 @@ def build_store(settings: Settings, dimension: int) -> MilvusStore:
 def ingest_path(settings: Settings, path: Path, pattern: str, batch_size: int) -> dict[str, int]:
     """完整入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
 
+    return ingest_documents(settings, load_documents(path, pattern), batch_size)
+
+
+def ingest_documents(
+    settings: Settings,
+    documents: list[tuple[str, str]],
+    batch_size: int,
+) -> dict[str, int]:
+    """把已经解析好的文档文本写入 Milvus。
+
+    `source` 由调用方传入：CLI 使用本地路径，上传接口使用原始文件名。
+    这样前端上传文件后，检索结果不会暴露服务端临时文件路径。
+    """
+
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
 
-    documents = load_documents(path, pattern)
     # 到这里时，MinerU 已经把复杂文档转换成 Markdown；后续流程统一处理文本。
     chunks = [
         chunk

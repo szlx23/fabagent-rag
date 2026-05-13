@@ -8,6 +8,7 @@ __pycache__/
 .env
 data/milvus/
 data/mineru/
+data/uploads/
 data/raw/*
 !data/raw/.gitkeep
 data/semi-document/

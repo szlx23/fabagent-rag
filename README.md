@@ -63,6 +63,17 @@ uvicorn fabagent_rag.api:app --reload
 
 启动后访问 `http://127.0.0.1:8000/docs` 查看接口文档。
 
+前端上传文件可以调用 `POST /ingest/upload`，请求类型为 `multipart/form-data`：
+
+```bash
+curl -X POST http://127.0.0.1:8000/ingest/upload \
+  -F "files=@data/raw/example.pdf" \
+  -F "batch_size=10"
+```
+
+如果一次上传多个文件，重复传 `files` 字段即可。服务端会用上传文件名作为检索来源，
+不会把临时解析路径写入 Milvus。
+
 ## 配置
 
 环境变量会从 `.env` 文件中加载。
@@ -103,5 +114,6 @@ rag ingest data/raw --pattern "**/*.md"
 rag ingest data/raw --pattern "**/*.pdf"
 rag ask "你的问题" --top-k 5
 uvicorn fabagent_rag.api:app --reload
+curl -X POST http://127.0.0.1:8000/ingest/upload -F "files=@data/raw/example.pdf"
 python scripts/reset_milvus.py
 ```
