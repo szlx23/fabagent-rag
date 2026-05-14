@@ -11,7 +11,8 @@ from fabagent_rag.chunking import (
 from fabagent_rag.config import Settings
 from fabagent_rag.documents import load_document_text
 from fabagent_rag.embeddings import EmbeddingModel
-from fabagent_rag.llm import build_answer
+from fabagent_rag.intent import detect_intent
+from fabagent_rag.llm import build_answer, build_chat_answer
 from fabagent_rag.milvus_store import MilvusStore
 
 
@@ -138,7 +139,25 @@ def ingest_chunks(
 
 
 def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, object]:
-    """完整问答流程：问题向量化 -> Milvus 召回 -> LLM 生成/降级返回上下文。"""
+    """完整问答流程：先识别意图，再决定是否走知识库检索。"""
+
+    intent = detect_intent(question)
+
+    # 闲聊不需要资料库支撑，直接使用推理模型能力；contexts 为空可以让前端明确知道
+    # 这次回答没有引用知识库片段。
+    if intent == "chat":
+        answer = build_chat_answer(
+            question,
+            settings.inference_api_key,
+            settings.inference_base_url,
+            settings.inference_model,
+        )
+        return {
+            "question": question,
+            "intent": intent,
+            "answer": answer,
+            "contexts": [],
+        }
 
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
@@ -153,6 +172,7 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
     )
     return {
         "question": question,
+        "intent": intent,
         "answer": answer,
         "contexts": contexts,
     }

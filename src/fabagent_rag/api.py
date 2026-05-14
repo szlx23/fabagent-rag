@@ -76,6 +76,7 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     question: str
+    intent: str
     answer: str
     contexts: list[dict[str, object]]
 

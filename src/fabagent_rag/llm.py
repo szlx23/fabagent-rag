@@ -2,6 +2,47 @@ from openai import OpenAI
 from openai import OpenAIError
 
 
+def build_chat_answer(
+    question: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> str:
+    """不经过知识库检索，直接用推理模型处理闲聊类问题。"""
+
+    if not api_key or not base_url or not model:
+        return "当前没有完整配置推理模型，暂时无法处理闲聊问题。"
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 FabAgent RAG 的助手。"
+                        "当前问题被识别为闲聊，不需要检索资料库。"
+                        "请简洁回答；如果用户提出实时信息或专业事实查询，提醒用户改为基于资料库提问。"
+                    ),
+                },
+                {"role": "user", "content": question},
+            ],
+            temperature=0.5,
+        )
+    except OpenAIError as exc:
+        return f"推理模型调用失败：{exc}"
+
+    if not response.choices:
+        return "推理模型没有返回回答内容：choices 为空"
+
+    content = response.choices[0].message.content
+    if not content:
+        return "推理模型返回了空回答"
+
+    return content
+
+
 def build_answer(
     question: str,
     contexts: list[dict[str, object]],

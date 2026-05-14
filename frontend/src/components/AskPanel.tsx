@@ -12,6 +12,12 @@ const QUICK_PROMPTS = [
   "列出涉及的参数和限制",
 ];
 
+const INTENT_LABELS: Record<AskResponse["intent"], string> = {
+  lookup: "资料查询",
+  summarize: "资料总结",
+  chat: "闲聊",
+};
+
 type MarkdownBlockProps = {
   content: string;
   variant?: "answer" | "context";
@@ -142,7 +148,9 @@ export function AskPanel() {
         <div className="resultBlock">
           <div className="sectionTitleRow">
             <h3>回答</h3>
-            <span>{result.contexts.length} 条召回</span>
+            <span>
+              {INTENT_LABELS[result.intent] ?? result.intent} · {result.contexts.length} 条召回
+            </span>
           </div>
           <MarkdownBlock content={result.answer} variant="answer" />
 

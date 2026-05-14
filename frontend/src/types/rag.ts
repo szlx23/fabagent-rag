@@ -22,6 +22,7 @@ export type ChunkConfig = {
 
 export type AskResponse = {
   question: string;
+  intent: "lookup" | "summarize" | "chat";
   answer: string;
   contexts: Array<{
     source?: string;

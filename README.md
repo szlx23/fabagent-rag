@@ -250,19 +250,30 @@ Collection schema：
 
 ### 6. Query 处理策略
 
-当前 query 处理保持最小实现。
+当前 query 处理保持轻量实现，先用规则识别少量意图。
 
 当前流程：
 
 1. 用户输入原始问题
-2. 直接对问题做 embedding
-3. 使用问题向量到 Milvus 搜索 top-k
-4. 把召回上下文交给推理模型生成回答
+2. 使用规则识别意图：`lookup`、`summarize`、`chat`
+3. `lookup` 和 `summarize` 会对问题做 embedding
+4. 使用问题向量到 Milvus 搜索 top-k
+5. 把召回上下文交给推理模型生成回答
+6. `chat` 会跳过 Milvus，直接使用推理模型处理闲聊
+
+规则策略：
+
+- 包含“总结、概括、归纳、摘要、梳理”等关键词时，识别为 `summarize`
+- 明确的问候、感谢、自我介绍、闲聊表达，识别为 `chat`
+- 其他问题默认识别为 `lookup`
+
+这里故意默认走 `lookup`。如果规则判断不准，走知识库检索比误走闲聊更符合当前项目目标。
 
 当前尚未实现：
 
 - query rewrite
 - query expansion
+- LLM 意图识别
 - 多轮对话历史压缩
 - HyDE
 - 关键词检索和向量检索混合召回
@@ -297,6 +308,7 @@ Collection schema：
 - system prompt 要求只能根据提供的上下文回答
 - 如果上下文不足，需要说明缺少哪些信息
 - 上下文会带来源位置：`source / page / section_title`
+- 闲聊意图不使用该 prompt，会直接调用推理模型生成简洁回答
 
 如果没有配置推理模型，或者推理接口失败：
 
