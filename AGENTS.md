@@ -16,3 +16,9 @@ Examples:
 /home/szlx23/conda/envs/rag/bin/python -m uvicorn fabagent_rag.api:app --reload
 /home/szlx23/conda/envs/rag/bin/rag ask "OPC有哪些类型？"
 ```
+
+## Workflow
+
+After completing an independent user request in this repository, commit the
+finished change and push it to the configured remote branch, unless the user
+explicitly asks not to commit or not to push.
