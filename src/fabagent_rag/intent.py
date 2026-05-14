@@ -2,6 +2,7 @@ from typing import Literal
 
 
 Intent = Literal["lookup", "summarize", "chat"]
+INTENT_VALUES: tuple[Intent, ...] = ("lookup", "summarize", "chat")
 
 
 SUMMARY_KEYWORDS = (
@@ -62,3 +63,16 @@ def detect_intent(question: str) -> Intent:
         return "chat"
 
     return "lookup"
+
+
+def normalize_intent(value: object, fallback: Intent = "lookup") -> Intent:
+    """把外部输入收敛到系统支持的三种意图。
+
+    LLM 返回值、HTTP 参数、调试脚本都可能带来不可控字符串；集中归一化可以避免
+    下游分支出现未定义状态。
+    """
+
+    normalized = str(value or "").strip().lower()
+    if normalized in INTENT_VALUES:
+        return normalized  # type: ignore[return-value]
+    return fallback

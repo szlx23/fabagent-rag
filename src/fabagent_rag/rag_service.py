@@ -12,7 +12,7 @@ from fabagent_rag.config import Settings
 from fabagent_rag.documents import load_document_text
 from fabagent_rag.embeddings import EmbeddingModel
 from fabagent_rag.intent import detect_intent
-from fabagent_rag.llm import build_answer, build_chat_answer
+from fabagent_rag.llm import build_answer, build_chat_answer, classify_intent_with_llm
 from fabagent_rag.milvus_store import MilvusStore
 
 
@@ -139,12 +139,60 @@ def ingest_chunks(
 
 
 def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, object]:
-    """完整问答流程：先识别意图，再决定是否走知识库检索。"""
+    """完整问答流程：规则先分流，LLM 在生成前复核意图。"""
 
-    intent = detect_intent(question)
+    rule_intent = detect_intent(question)
 
-    # 闲聊不需要资料库支撑，直接使用推理模型能力；contexts 为空可以让前端明确知道
-    # 这次回答没有引用知识库片段。
+    # 规则认为是闲聊时，先让 LLM 复核一次。若 LLM 认为仍需资料库，后端会补一次检索，
+    # 不把“请检索”这种中间状态暴露给前端。
+    if rule_intent == "chat":
+        intent = classify_intent_with_llm(
+            question,
+            rule_intent,
+            settings.inference_api_key,
+            settings.inference_base_url,
+            settings.inference_model,
+        )
+        if intent != "chat":
+            contexts = search_contexts(settings, question, top_k)
+            answer = build_answer(
+                question,
+                contexts,
+                settings.inference_api_key,
+                settings.inference_base_url,
+                settings.inference_model,
+            )
+            return {
+                "question": question,
+                "intent": intent,
+                "answer": answer,
+                "contexts": contexts,
+            }
+
+        answer = build_chat_answer(
+            question,
+            settings.inference_api_key,
+            settings.inference_base_url,
+            settings.inference_model,
+        )
+        return {
+            "question": question,
+            "intent": intent,
+            "answer": answer,
+            "contexts": [],
+        }
+
+    contexts = search_contexts(settings, question, top_k)
+    intent = classify_intent_with_llm(
+        question,
+        rule_intent,
+        settings.inference_api_key,
+        settings.inference_base_url,
+        settings.inference_model,
+    )
+
+    # 规则认为需要 RAG，但 LLM 复核后认为只是闲聊时，丢弃刚召回的上下文，避免把无关
+    # 资料硬塞进闲聊回答里。
     if intent == "chat":
         answer = build_chat_answer(
             question,
@@ -159,10 +207,6 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
             "contexts": [],
         }
 
-    embedder = build_embedder(settings)
-    store = build_store(settings, embedder.dimension)
-    query_embedding = embedder.encode([question])[0]
-    contexts = store.search(query_embedding, top_k=top_k)
     answer = build_answer(
         question,
         contexts,
@@ -176,3 +220,12 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
         "answer": answer,
         "contexts": contexts,
     }
+
+
+def search_contexts(settings: Settings, question: str, top_k: int) -> list[dict[str, object]]:
+    """把问题向量化后到 Milvus 召回上下文。"""
+
+    embedder = build_embedder(settings)
+    store = build_store(settings, embedder.dimension)
+    query_embedding = embedder.encode([question])[0]
+    return store.search(query_embedding, top_k=top_k)

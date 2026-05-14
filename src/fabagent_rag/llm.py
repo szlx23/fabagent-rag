@@ -1,5 +1,87 @@
+import json
+
 from openai import OpenAI
 from openai import OpenAIError
+
+from fabagent_rag.intent import Intent, normalize_intent
+
+
+def classify_intent_with_llm(
+    question: str,
+    rule_intent: Intent,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> Intent:
+    """用 LLM 对规则意图做一次轻量复核。
+
+    这一步只允许模型在三种意图里选择，不让它直接生成业务回答。解析失败或模型不可用时，
+    回退到规则结果，保证问答链路不会因为意图识别增强而中断。
+    """
+
+    if not api_key or not base_url or not model:
+        return rule_intent
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你只负责判断用户问题在 FabAgent RAG 中应该走哪条路径。"
+                        "只能返回 JSON，不要返回 Markdown。"
+                        "可选 intent："
+                        "lookup=需要查询资料库回答；"
+                        "summarize=需要基于资料库总结归纳；"
+                        "chat=普通闲聊或助手自我介绍，不需要资料库。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"规则识别结果：{rule_intent}\n"
+                        f"用户问题：{question}\n"
+                        '请只返回：{"intent":"lookup|summarize|chat"}'
+                    ),
+                },
+            ],
+            temperature=0,
+        )
+    except OpenAIError:
+        return rule_intent
+
+    if not response.choices:
+        return rule_intent
+
+    content = response.choices[0].message.content or ""
+    return parse_intent_json(content, rule_intent)
+
+
+def parse_intent_json(content: str, fallback: Intent) -> Intent:
+    """解析 LLM 返回的最小 JSON，兼容模型偶尔包一层说明文本的情况。"""
+
+    stripped = content.strip()
+    if not stripped:
+        return fallback
+
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return fallback
+        try:
+            payload = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return fallback
+
+    if not isinstance(payload, dict):
+        return fallback
+
+    return normalize_intent(payload.get("intent"), fallback)
 
 
 def build_chat_answer(
