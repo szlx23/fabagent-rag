@@ -105,6 +105,233 @@ chunk、embedding、Milvus 写入都复用同一套流程。
 | MD、Markdown | native loader | 原始 Markdown |
 | HTML、HTM | trafilatura | Markdown-like 正文 |
 
+## RAG 流程与策略
+
+这一节记录当前项目从文件进入系统到最终回答的完整策略，方便 review 当前实现。
+其中有些阶段目前还是最小可用版本，后续可以逐步优化。
+
+### 1. 文件解析策略
+
+目标是把不同格式统一转换为 Markdown/text 中间格式，后续 chunk、embedding、存储和检索
+都只处理这一种统一文本。
+
+当前实现：
+
+- 单文件路径入库：`rag ingest <file>` 或 `POST /ingest`
+- 前端批量上传：`POST /ingest/upload` 或 `POST /parse/upload`
+- 不再在 `documents.py` 中处理目录和 glob pattern，批量能力放在上传接口和前端侧
+- 文件类型通过扩展名分发到不同 Parser
+- 上传文件会先保存到 `data/uploads` 下的临时目录，解析完成后删除临时文件
+- 对用户可见的来源使用上传文件名，不暴露服务端临时路径
+
+解析器选择：
+
+- PDF、图片：使用 MinerU CLI，输出 Markdown
+- DOCX、PPTX：使用 Docling，输出 Markdown
+- DOC、PPT：先用 LibreOffice/soffice 转成 DOCX/PPTX，再交给 Docling
+- XLSX：使用 pandas 读取每个 sheet，再用 `DataFrame.to_markdown(index=False)` 转 Markdown 表格
+- TXT：直接读取原始文本
+- MD/Markdown：直接读取原始 Markdown，不做语法校验
+- HTML：使用 trafilatura 抽正文，输出 Markdown-like 文本
+
+MinerU 策略：
+
+- 通过 `MINERU_BACKEND` 配置 MinerU 的 backend
+- 默认 `pipeline`，更适合本地 CPU-only 开发环境
+- 可选值直接使用 MinerU 原生 backend：`pipeline`、`vlm-http-client`、`hybrid-http-client`、`vlm-auto-engine`、`hybrid-auto-engine`
+- 当前关闭公式解析：`--formula false`
+- 当前保留表格解析：`--table true`
+- `MINERU_MODEL_SOURCE` 默认使用 `modelscope`，适合国内环境下载模型
+
+### 2. Chunk 策略
+
+目标是尽量让每个 chunk 有完整语义，同时不超过 embedding 模型适合处理的长度。
+
+当前自动 chunk 采用结构优先策略：
+
+1. 先把 Markdown/text 识别为语义块
+2. 再把同一章节下的相邻语义块打包成 chunk
+3. 单个语义块超过 `CHUNK_SIZE` 时，才按长度兜底切分
+4. 最后合并过短 chunk，减少没有独立语义的小片段
+
+当前识别的语义块：
+
+- Markdown 标题
+- 普通段落
+- 有序/无序列表
+- Markdown 表格
+- fenced code block
+
+标题处理：
+
+- 使用标题栈推断 `section_title`
+- 例如 `# A`、`## B`、`### C` 下的内容会得到 `A / B / C`
+- fenced code block 中的 `#` 不会被当作标题
+
+合并策略：
+
+- 同一章节内，相邻语义块会尽量合并到一个 chunk
+- 不跨章节合并，避免一个 chunk 的来源标题指向不清
+- 小于 `MIN_CHUNK_SIZE` 的 chunk 会尝试和前后 chunk 合并
+- 合并后不能超过 `CHUNK_SIZE`
+- `CHUNK_OVERLAP` 只用于超长语义块的兜底长度切分，不作为主切分策略
+
+手动 chunk：
+
+- 前端可以先解析文件，展示初始 chunk
+- 用户可以编辑、插入、删除 chunk
+- 后端仍会过滤空 chunk，并按配置合并过短 chunk
+- 手动 chunk 的 `section_title` 会从用户提交的文本中用标题栈推断
+
+### 3. Metadata 策略
+
+当前 metadata 保持最小化，只保留员工容易理解、前端能展示、后续能扩展的字段。
+
+每条召回结果对外返回：
+
+```json
+{
+  "source": "文件名",
+  "page": 1,
+  "section_title": "一级标题 / 二级标题"
+}
+```
+
+当前状态：
+
+- `source`：文件名或本地文件路径
+- `page`：字段已预留；当前解析链路多数情况下拿不到可靠页码，所以未知时返回 `null`
+- `section_title`：从 Markdown 标题栈推断
+- `chunk_index`：不对前端和 LLM 暴露，避免把技术字段展示给员工
+
+### 4. Embedding 策略
+
+目标是把 chunk 文本转换成向量，写入 Milvus 做相似度搜索。
+
+当前实现：
+
+- 使用 OpenAI 兼容接口调用 embedding 模型
+- 模型名由 `EMBEDDING_MODEL` 配置
+- API key 和 base URL 当前读取 `ARK_API_KEY`、`ARK_CODING_PLAN_BASE_URL`
+- 入库时按批调用 embedding，默认批大小是 10
+- embedding 结果会做归一化，因此 Milvus 搜索使用 IP 可以近似 cosine similarity
+
+当前尚未实现：
+
+- 按模型 token limit 自动截断或重切
+- embedding 请求重试
+- embedding 缓存
+- 文档去重或 chunk 去重
+- 多路 embedding 模型
+
+### 5. 向量存储策略
+
+当前使用 Milvus standalone。
+
+Collection schema：
+
+- `id`：Milvus auto id
+- `source`：来源文件
+- `page`：页码，未知时内部存 0，对外返回 `null`
+- `section_title`：标题路径
+- `text`：chunk 正文，当前最多写入 8192 字符
+- `embedding`：向量字段
+
+索引策略：
+
+- 使用 Milvus `AUTOINDEX`
+- metric 使用 `IP`
+- 因为 embedding 已归一化，所以 IP 可以近似 cosine similarity
+
+兼容策略：
+
+- 如果本地已经存在旧 collection，代码会读取实际字段，尽量兼容旧 schema
+- 如果需要让旧数据也带新 metadata，建议执行 `scripts/reset_milvus.py` 后重新入库
+
+### 6. Query 处理策略
+
+当前 query 处理保持最小实现。
+
+当前流程：
+
+1. 用户输入原始问题
+2. 直接对问题做 embedding
+3. 使用问题向量到 Milvus 搜索 top-k
+4. 把召回上下文交给推理模型生成回答
+
+当前尚未实现：
+
+- query rewrite
+- query expansion
+- 多轮对话历史压缩
+- HyDE
+- 关键词检索和向量检索混合召回
+- metadata filter
+- 按文件、章节、页码过滤
+
+### 7. 相似度搜索策略
+
+当前搜索策略：
+
+- 使用 Milvus vector search
+- 搜索字段：`embedding`
+- 返回字段：`source`、`page`、`section_title`、`text`
+- `top_k` 由 CLI 或前端控制，默认前端为 3，API 默认值为 4
+- score 使用 Milvus 返回的 distance/score
+
+当前尚未实现：
+
+- rerank
+- score threshold
+- MMR 去冗余
+- 同文件/同章节结果合并
+- 表格 chunk 特殊排序
+- 长上下文压缩
+
+### 8. 回答生成策略
+
+如果配置了推理模型，会调用 OpenAI 兼容 chat completions 接口生成回答。
+
+当前 prompt 策略：
+
+- system prompt 要求只能根据提供的上下文回答
+- 如果上下文不足，需要说明缺少哪些信息
+- 上下文会带来源位置：`source / page / section_title`
+
+如果没有配置推理模型，或者推理接口失败：
+
+- 系统不会中断问答流程
+- 会直接返回检索到的上下文
+- 这样可以独立排查“检索是否正常”和“生成是否正常”
+
+当前尚未实现：
+
+- 引用编号强约束
+- 答案置信度
+- 无答案检测
+- 多 chunk 综合推理优化
+- 答案后处理
+- 返回结构化 citation
+
+### 9. 前端交互策略
+
+当前前端是一个 RAG 工作台：
+
+- 左侧负责文件上传、自动入库、手动 chunk
+- 右侧负责检索问答和来源核对
+- 支持批量选择文件上传
+- 支持手动编辑 chunk 后确认入库
+- 回答区使用 Markdown 渲染
+- 召回上下文默认展示来源，点击后查看具体内容
+
+前端展示来源时优先使用：
+
+```text
+source / 第 x 页 / section_title
+```
+
+页码为空时不展示页码。
+
 ## 配置
 
 环境变量会从 `.env` 文件中加载。
