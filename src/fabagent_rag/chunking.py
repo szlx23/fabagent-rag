@@ -4,6 +4,9 @@ import re
 
 
 _MARKDOWN_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+_MARKDOWN_TABLE_SEPARATOR_PATTERN = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
+_MARKDOWN_LIST_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_FENCED_CODE_MARKERS = ("```", "~~~")
 
 
 @dataclass(frozen=True)
@@ -30,11 +33,32 @@ class ChunkConfig:
     min_chunk_size: int
 
 
+@dataclass(frozen=True)
+class TextBlock:
+    """从 Markdown/text 中识别出来的语义块。
+
+    自动切块不直接按字符窗口切，而是先识别标题、段落、列表、表格、代码块。
+    每个 block 携带当时的标题栈，后面生成 chunk 时可直接作为 section_title。
+    """
+
+    text: str
+    section_title: str
+
+
+@dataclass(frozen=True)
+class ChunkDraft:
+    """尚未编号入库的 chunk 草稿。"""
+
+    text: str
+    section_title: str
+
+
 def split_text(text: str, source: str, config: ChunkConfig) -> list[Chunk]:
     """把文档文本切成适合 embedding 的分块。
 
-    RAG 检索不是按完整文档查，而是按 chunk 查。chunk 太大时语义会变稀释，
-    太小时上下文又不够。`chunk_overlap` 用来让相邻片段保留一部分上下文。
+    这里采用“结构优先”的切法：先按 Markdown 结构识别语义块，再把语义块打包
+    成不超过 `chunk_size` 的 chunk。只有单个语义块过大时，才用字符窗口兜底切分。
+    这样比纯固定窗口更稳定，表格、列表、代码块和标题上下文更不容易被截断。
     """
 
     clean_text = "\n".join(line.rstrip() for line in text.splitlines()).strip()
@@ -43,42 +67,278 @@ def split_text(text: str, source: str, config: ChunkConfig) -> list[Chunk]:
 
     validate_chunk_config(config)
 
-    chunk_size = config.chunk_size
-    chunk_overlap = config.chunk_overlap
-
-    raw_chunks: list[str] = []
-    start = 0
-
-    while start < len(clean_text):
-        end = min(start + chunk_size, len(clean_text))
-        window = clean_text[start:end]
-
-        if end < len(clean_text):
-            # 尽量在段落或句子边界切分，减少把一句话从中间截断的概率。
-            # 如果当前窗口里没有足够靠后的自然边界，就按固定长度切。
-            paragraph_break = window.rfind("\n\n")
-            sentence_break = max(window.rfind(". "), window.rfind("? "), window.rfind("! "))
-            break_at = paragraph_break if paragraph_break > chunk_size * 0.5 else sentence_break
-            if break_at > chunk_size * 0.5:
-                end = start + break_at + 1
-                window = clean_text[start:end]
-
-        raw_chunks.append(window.strip())
-
-        if end >= len(clean_text):
-            break
-        start = max(0, end - chunk_overlap)
-
-    merged_chunks = merge_small_text_chunks(raw_chunks, config)
+    blocks = split_markdown_blocks(clean_text)
+    chunk_drafts = pack_blocks_into_chunks(blocks, config)
+    merged_chunks = merge_small_chunk_drafts(chunk_drafts, config)
     return [
         Chunk(
-            text=chunk_text,
+            text=chunk.text,
             source=source,
             index=index,
-            section_title=infer_section_title(clean_text, chunk_text),
+            section_title=chunk.section_title,
         )
-        for index, chunk_text in enumerate(merged_chunks)
+        for index, chunk in enumerate(merged_chunks)
     ]
+
+
+def split_markdown_blocks(text: str) -> list[TextBlock]:
+    """把 Markdown/text 切成语义块，并给每个块附上标题路径。
+
+    工业界常见做法是先尊重文档结构边界，再考虑 token/字符限制。这里不用 Markdown
+    AST，是为了保持依赖简单；规则覆盖 RAG 中最关键的结构：标题、段落、表格、
+    列表和 fenced code block。
+    """
+
+    lines = text.splitlines()
+    blocks: list[TextBlock] = []
+    heading_stack: dict[int, str] = {}
+    index = 0
+
+    def current_section_title() -> str:
+        return " / ".join(heading_stack[level] for level in sorted(heading_stack))
+
+    def append_block(block_lines: list[str], section_title: str | None = None) -> None:
+        block_text = "\n".join(block_lines).strip()
+        if block_text:
+            blocks.append(TextBlock(block_text, section_title or current_section_title()))
+
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+
+        if not stripped:
+            index += 1
+            continue
+
+        heading = _MARKDOWN_HEADING_PATTERN.match(stripped)
+        if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            # 低层级标题进入栈时，需要弹出同级和更深层级标题。
+            heading_stack = {
+                heading_level: heading_title
+                for heading_level, heading_title in heading_stack.items()
+                if heading_level < level
+            }
+            heading_stack[level] = title
+            append_block([line])
+            index += 1
+            continue
+
+        if is_fenced_code_start(stripped):
+            fence_marker = stripped[:3]
+            code_lines = [line]
+            index += 1
+            while index < len(lines):
+                code_lines.append(lines[index])
+                if lines[index].strip().startswith(fence_marker):
+                    index += 1
+                    break
+                index += 1
+            append_block(code_lines)
+            continue
+
+        if is_table_start(lines, index):
+            table_lines = [line, lines[index + 1]]
+            index += 2
+            while index < len(lines) and "|" in lines[index] and lines[index].strip():
+                table_lines.append(lines[index])
+                index += 1
+            append_block(table_lines)
+            continue
+
+        if is_list_start(stripped):
+            list_lines = [line]
+            index += 1
+            while index < len(lines):
+                next_line = lines[index]
+                next_stripped = next_line.strip()
+                if not next_stripped:
+                    break
+                if is_special_block_start(lines, index) and not is_list_start(next_stripped):
+                    break
+                if is_list_start(next_stripped) or next_line.startswith((" ", "\t")):
+                    list_lines.append(next_line)
+                    index += 1
+                    continue
+                break
+            append_block(list_lines)
+            continue
+
+        paragraph_lines = [line]
+        index += 1
+        while index < len(lines):
+            next_line = lines[index]
+            if not next_line.strip() or is_special_block_start(lines, index):
+                break
+            paragraph_lines.append(next_line)
+            index += 1
+        append_block(paragraph_lines)
+
+    return blocks
+
+
+def pack_blocks_into_chunks(blocks: list[TextBlock], config: ChunkConfig) -> list[ChunkDraft]:
+    """把语义块打包成 chunk。
+
+    打包规则：
+    1. 不跨章节合并，避免一个 chunk 的 section_title 指向不清。
+    2. 同章节内尽量合并相邻语义块，提高召回上下文完整度。
+    3. 单个语义块超限时才调用长度兜底切分。
+    """
+
+    drafts: list[ChunkDraft] = []
+    current_text = ""
+    current_section = ""
+
+    def flush_current() -> None:
+        nonlocal current_text, current_section
+        if current_text.strip():
+            drafts.append(ChunkDraft(current_text.strip(), current_section))
+        current_text = ""
+        current_section = ""
+
+    for block in blocks:
+        block_text = block.text.strip()
+        if not block_text:
+            continue
+
+        if len(block_text) > config.chunk_size:
+            flush_current()
+            for piece in split_long_text(block_text, config):
+                drafts.append(ChunkDraft(piece, block.section_title))
+            continue
+
+        if not current_text:
+            current_text = block_text
+            current_section = block.section_title
+            continue
+
+        next_text = join_chunks(current_text, block_text)
+        if block.section_title == current_section and len(next_text) <= config.chunk_size:
+            current_text = next_text
+            continue
+
+        flush_current()
+        current_text = block_text
+        current_section = block.section_title
+
+    flush_current()
+    return drafts
+
+
+def split_long_text(text: str, config: ChunkConfig) -> list[str]:
+    """兜底切分超长语义块。
+
+    表格、代码块或长段落有可能单块超过 `chunk_size`。这时只能按长度切，但仍尽量
+    在段落/句子边界断开，并使用 `chunk_overlap` 保留局部上下文。
+    """
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + config.chunk_size, len(text))
+        window = text[start:end]
+
+        if end < len(text):
+            paragraph_break = window.rfind("\n\n")
+            sentence_break = max(window.rfind(". "), window.rfind("? "), window.rfind("! "))
+            break_at = (
+                paragraph_break
+                if paragraph_break > config.chunk_size * 0.5
+                else sentence_break
+            )
+            if break_at > config.chunk_size * 0.5:
+                end = start + break_at + 1
+                window = text[start:end]
+
+        chunks.append(window.strip())
+        if end >= len(text):
+            break
+        start = max(0, end - config.chunk_overlap)
+    return [chunk for chunk in chunks if chunk]
+
+
+def merge_small_chunk_drafts(chunks: list[ChunkDraft], config: ChunkConfig) -> list[ChunkDraft]:
+    """合并过短 chunk，同时保留明确的 section_title。
+
+    和旧的纯文本合并不同，这里只合并同一章节，或一方没有章节标题的 chunk。
+    这样可以减少小片段，又不会把两个不同章节混成一个来源不清的 chunk。
+    """
+
+    validate_chunk_config(config)
+    normalized = [chunk for chunk in chunks if chunk.text.strip()]
+    if config.min_chunk_size == 0 or len(normalized) <= 1:
+        return normalized
+
+    merged: list[ChunkDraft] = []
+    index = 0
+    while index < len(normalized):
+        current = normalized[index]
+        if len(current.text) >= config.min_chunk_size:
+            merged.append(current)
+            index += 1
+            continue
+
+        if merged and can_merge_chunk_drafts(merged[-1], current, config.chunk_size):
+            previous = merged[-1]
+            merged[-1] = ChunkDraft(
+                text=join_chunks(previous.text, current.text),
+                section_title=previous.section_title or current.section_title,
+            )
+            index += 1
+            continue
+
+        if index + 1 < len(normalized) and can_merge_chunk_drafts(
+            current, normalized[index + 1], config.chunk_size
+        ):
+            next_chunk = normalized[index + 1]
+            merged.append(
+                ChunkDraft(
+                    text=join_chunks(current.text, next_chunk.text),
+                    section_title=current.section_title or next_chunk.section_title,
+                )
+            )
+            index += 2
+            continue
+
+        merged.append(current)
+        index += 1
+
+    return merged
+
+
+def can_merge_chunk_drafts(left: ChunkDraft, right: ChunkDraft, chunk_size: int) -> bool:
+    same_section = left.section_title == right.section_title
+    missing_section = not left.section_title or not right.section_title
+    return (
+        (same_section or missing_section)
+        and len(join_chunks(left.text, right.text)) <= chunk_size
+    )
+
+
+def is_special_block_start(lines: list[str], index: int) -> bool:
+    stripped = lines[index].strip()
+    return (
+        bool(_MARKDOWN_HEADING_PATTERN.match(stripped))
+        or is_fenced_code_start(stripped)
+        or is_table_start(lines, index)
+        or is_list_start(stripped)
+    )
+
+
+def is_fenced_code_start(stripped_line: str) -> bool:
+    return stripped_line.startswith(_FENCED_CODE_MARKERS)
+
+
+def is_table_start(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    return "|" in lines[index] and bool(_MARKDOWN_TABLE_SEPARATOR_PATTERN.match(lines[index + 1]))
+
+
+def is_list_start(stripped_line: str) -> bool:
+    return bool(_MARKDOWN_LIST_PATTERN.match(stripped_line))
 
 
 def validate_chunk_config(config: ChunkConfig) -> None:
