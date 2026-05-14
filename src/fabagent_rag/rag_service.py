@@ -139,50 +139,9 @@ def ingest_chunks(
 
 
 def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, object]:
-    """完整问答流程：规则先分流，LLM 在生成前复核意图。"""
+    """完整问答流程：规则初判，LLM 复核后再决定是否检索。"""
 
     rule_intent = detect_intent(question)
-
-    # 规则认为是闲聊时，先让 LLM 复核一次。若 LLM 认为仍需资料库，后端会补一次检索，
-    # 不把“请检索”这种中间状态暴露给前端。
-    if rule_intent == "chat":
-        intent = classify_intent_with_llm(
-            question,
-            rule_intent,
-            settings.inference_api_key,
-            settings.inference_base_url,
-            settings.inference_model,
-        )
-        if intent != "chat":
-            contexts = search_contexts(settings, question, top_k)
-            answer = build_answer(
-                question,
-                contexts,
-                settings.inference_api_key,
-                settings.inference_base_url,
-                settings.inference_model,
-            )
-            return {
-                "question": question,
-                "intent": intent,
-                "answer": answer,
-                "contexts": contexts,
-            }
-
-        answer = build_chat_answer(
-            question,
-            settings.inference_api_key,
-            settings.inference_base_url,
-            settings.inference_model,
-        )
-        return {
-            "question": question,
-            "intent": intent,
-            "answer": answer,
-            "contexts": [],
-        }
-
-    contexts = search_contexts(settings, question, top_k)
     intent = classify_intent_with_llm(
         question,
         rule_intent,
@@ -191,8 +150,8 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
         settings.inference_model,
     )
 
-    # 规则认为需要 RAG，但 LLM 复核后认为只是闲聊时，丢弃刚召回的上下文，避免把无关
-    # 资料硬塞进闲聊回答里。
+    # 最终 intent 为 chat 时不访问 Milvus。这样规则误判为 lookup 的闲聊问题，
+    # 不会浪费检索，也不会把无关上下文带进回答。
     if intent == "chat":
         answer = build_chat_answer(
             question,
@@ -207,6 +166,7 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
             "contexts": [],
         }
 
+    contexts = search_contexts(settings, question, top_k)
     answer = build_answer(
         question,
         contexts,

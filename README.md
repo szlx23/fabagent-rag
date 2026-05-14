@@ -250,18 +250,16 @@ Collection schema：
 
 ### 6. Query 处理策略
 
-当前 query 处理采用“两级意图门控”：规则先分流，LLM 在真正生成前复核一次。
+当前 query 处理采用“两级意图门控”：规则先做快速初判，LLM 再复核成最终意图。
 
 当前流程：
 
 1. 用户输入原始问题
 2. 使用规则识别意图：`lookup`、`summarize`、`chat`
-3. 到调用大模型前，先让 LLM 用严格 JSON 复核意图
-4. 如果规则和 LLM 都认为是 `chat`，直接闲聊回答
-5. 如果规则认为是 `chat`，但 LLM 认为需要资料库，后端补一次 Milvus 检索，再走 RAG 回答
-6. 如果规则认为是 `lookup`/`summarize`，会先召回上下文，再让 LLM 复核
-7. 如果 LLM 复核后认为其实是 `chat`，系统丢弃召回上下文，直接闲聊回答
-8. 其他情况按 RAG 流程回答
+3. LLM 用严格 JSON 复核规则结果，得到最终意图
+4. 最终意图为 `chat`：不检索 Milvus，直接闲聊回答
+5. 最终意图为 `lookup`/`summarize`：再执行 Milvus 检索
+6. 把召回上下文交给推理模型生成回答
 
 规则策略：
 
@@ -276,17 +274,11 @@ Collection schema：
 ```mermaid
 flowchart TD
     A[用户问题] --> B[规则意图识别]
-    B --> C{规则结果}
-
-    C -->|chat| D[LLM 复核意图]
+    B --> C[LLM 复核意图]
+    C --> D{最终意图}
     D -->|chat| E[直接闲聊回答]
     D -->|lookup / summarize| F[Milvus 检索]
     F --> G[基于上下文回答]
-
-    C -->|lookup / summarize| H[Milvus 检索]
-    H --> I[LLM 复核意图]
-    I -->|chat| J[丢弃上下文并闲聊回答]
-    I -->|lookup / summarize| K[基于上下文回答]
 ```
 
 LLM 复核策略：
@@ -294,6 +286,7 @@ LLM 复核策略：
 - 只允许输出 `lookup`、`summarize`、`chat`
 - 要求返回 JSON：`{"intent":"lookup"}`
 - 如果没有配置推理模型、模型调用失败、返回内容解析失败，就回退到规则结果
+- 只有最终意图为 `lookup` 或 `summarize` 时才会访问 Milvus
 - 对 RAG 类问题，回答生成仍然受“只能根据召回上下文回答”的约束
 
 当前尚未实现：
