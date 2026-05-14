@@ -335,14 +335,22 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
   }
 
   return (
-    <section className="panel">
+    <section className="panel ingestionPanel">
       <div className="panelHeader">
         <div>
-          <span className="panelLabel">Ingestion</span>
+          <span className="panelLabel">Ingestion pipeline</span>
           <h2>文档入库</h2>
-          <p>自动分块适合批量测试；手动分块适合检查解析质量和边界。</p>
+          <p>先选择文件，再决定自动入库或进入人工分块审核。</p>
         </div>
         <span className="panelBadge">{chunkMode === "auto" ? "Auto Chunk" : "Manual Review"}</span>
+      </div>
+
+      <div className="processRail" aria-label="入库流程">
+        <span className={files.length > 0 ? "done" : "active"}>选择文件</span>
+        <span className={chunkMode === "manual" && manualDocuments.length > 0 ? "done" : ""}>
+          解析预览
+        </span>
+        <span className={status === "done" ? "done" : ""}>写入索引</span>
       </div>
 
       <div className="segmentedControl" aria-label="分块模式">
@@ -371,7 +379,9 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
           accept=".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,.ppt,.pptx,.xlsx,.html,.htm"
           onChange={handleFilesSelected}
         />
-        <span className="dropIcon" aria-hidden="true">+</span>
+        <span className="dropIcon" aria-hidden="true">
+          +
+        </span>
         <span className="dropCopy">
           <strong>{files.length > 0 ? `${files.length} 个文件待处理` : "拖入或选择文档"}</strong>
           <small>PDF / DOC / DOCX / PPT / PPTX / XLSX / HTML / MD / TXT / 图片</small>
@@ -381,6 +391,10 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
 
       {files.length > 0 && (
         <div className="fileList">
+          <div className="fileListHeader">
+            <strong>待处理文件</strong>
+            <span>{files.length} 个，{(totalSize / 1024).toFixed(1)} KB</span>
+          </div>
           {files.map((file, index) => (
             <div className="fileRow" key={`${file.name}-${file.size}`}>
               <div className="fileNameGroup">
@@ -403,13 +417,12 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
               </div>
             </div>
           ))}
-          <div className="fileTotal">合计 {(totalSize / 1024).toFixed(1)} KB</div>
         </div>
       )}
 
       {chunkMode === "auto" ? (
-        <div className="controlRow">
-          <span className="modeHint">使用后端默认 chunk 策略。</span>
+        <div className="actionBar">
+          <span className="modeHint">自动解析、自动分块，适合批量导入测试资料。</span>
           <button disabled={!canStart} onClick={handleAutoUpload} type="button">
             {status === "uploading" ? "处理中" : "解析并入库"}
           </button>
@@ -461,7 +474,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
               参数无效：Overlap 和小 chunk 阈值不能大于或等于 chunk 上限。
             </p>
           )}
-          <div className="controlRow">
+          <div className="actionBar">
             <span className="modeHint">先解析预览，再手动编辑 chunk。</span>
             <button
               disabled={!canStart || !chunkConfigValid}

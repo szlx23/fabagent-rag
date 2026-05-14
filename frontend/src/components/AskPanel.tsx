@@ -81,53 +81,62 @@ export function AskPanel() {
     <section className="panel answerPanel">
       <div className="panelHeader">
         <div>
-          <span className="panelLabel">Retrieval</span>
+          <span className="panelLabel">Retrieval console</span>
           <h2>检索问答</h2>
-          <p>回答和引用来源分开展示，方便核对依据。</p>
+          <p>问题、答案和召回来源在同一视图里核对。</p>
         </div>
         <span className="panelBadge">Grounded QA</span>
       </div>
 
-      <div className="questionBox">
-        <textarea
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          placeholder={DEFAULT_QUESTION}
-          rows={4}
-        />
-      </div>
-
-      <div className="quickPromptRow" aria-label="常用问题">
-        {QUICK_PROMPTS.map((prompt) => (
-          <button
-            className="promptButton"
-            disabled={loading}
-            key={prompt}
-            onClick={() => setQuestion(prompt)}
-            type="button"
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-
-      <div className="controlRow">
-        <label>
-          Top K
-          <input
-            min={1}
-            max={20}
-            type="number"
-            value={topK}
-            onChange={(event) => setTopK(Number(event.target.value))}
+      <div className="askComposer">
+        <div className="questionBox">
+          <textarea
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder={DEFAULT_QUESTION}
+            rows={4}
           />
-        </label>
-        <button disabled={loading} onClick={handleAsk} type="button">
-          {loading ? "查询中" : "发送问题"}
-        </button>
+        </div>
+
+        <div className="quickPromptRow" aria-label="常用问题">
+          {QUICK_PROMPTS.map((prompt) => (
+            <button
+              className="promptButton"
+              disabled={loading}
+              key={prompt}
+              onClick={() => setQuestion(prompt)}
+              type="button"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
+        <div className="askToolbar">
+          <label>
+            <span>Top K</span>
+            <input
+              min={1}
+              max={20}
+              type="number"
+              value={topK}
+              onChange={(event) => setTopK(Number(event.target.value))}
+            />
+          </label>
+          <button disabled={loading} onClick={handleAsk} type="button">
+            {loading ? "查询中" : "发送问题"}
+          </button>
+        </div>
       </div>
 
       {error && <p className="statusText error">{error}</p>}
+
+      {!result && !error && (
+        <div className="answerEmpty">
+          <strong>等待提问</strong>
+          <span>入库后可以直接使用默认问题，也可以从上方快捷问题开始。</span>
+        </div>
+      )}
 
       {result && (
         <div className="resultBlock">

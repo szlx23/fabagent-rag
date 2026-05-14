@@ -9,18 +9,18 @@ function App() {
 
   return (
     <main className="appShell">
-      <header className="heroBar">
+      <header className="masthead">
         <div className="brandBlock">
-          <span className="eyebrow">FabAgent RAG Console</span>
-          <h1>文档索引与问答工作台</h1>
-          <p>把工艺、设备、SOP 和表格资料变成可追溯的知识索引。</p>
+          <span className="eyebrow">FabAgent RAG</span>
+          <h1>文档知识工作台</h1>
+          <p>上传资料、审核分块、检索问答，并始终保留答案来源。</p>
         </div>
-        <aside className="systemPanel" aria-label="服务模块">
-          <div className="systemStatus">
+        <aside className="runtimePanel" aria-label="运行环境">
+          <div className="runtimeStatus">
             <span className="statusDot" aria-hidden="true" />
-            Local stack
+            Local runtime
           </div>
-          <dl className="systemGrid">
+          <dl className="runtimeGrid">
             <div>
               <dt>API</dt>
               <dd>FastAPI</dd>
@@ -37,25 +37,31 @@ function App() {
         </aside>
       </header>
 
-      <section className="metricsGrid" aria-label="工作流状态">
-        <article className="metricCard">
-          <span>Document Flow</span>
-          <strong>Upload / Parse / Index</strong>
-          <small>支持自动入库与手动 chunk 审核。</small>
+      <section className="workflowStrip" aria-label="工作流状态">
+        <article>
+          <span>01</span>
+          <div>
+            <strong>解析文件</strong>
+            <small>PDF、Office、表格、Markdown、HTML、图片</small>
+          </div>
         </article>
-        <article className="metricCard">
-          <span>Answer Grounding</span>
-          <strong>Source-first Retrieval</strong>
-          <small>回答与召回来源分开展示。</small>
+        <article>
+          <span>02</span>
+          <div>
+            <strong>确认分块</strong>
+            <small>自动入库或人工检查 chunk 边界</small>
+          </div>
         </article>
-        <article className="metricCard accent">
-          <span>Last Ingest</span>
-          <strong>{lastIngest ? `${lastIngest.inserted} chunks` : "Waiting"}</strong>
-          <small>
-            {lastIngest
-              ? `${lastIngest.documents} 个文档：${lastIngest.sources.join("，")}`
-              : "完成入库后会在这里显示最近写入结果。"}
-          </small>
+        <article className="workflowStripResult">
+          <span>03</span>
+          <div>
+            <strong>{lastIngest ? `${lastIngest.inserted} 个 chunk 已入库` : "等待入库"}</strong>
+            <small>
+              {lastIngest
+                ? `${lastIngest.documents} 个文档：${lastIngest.sources.join("，")}`
+                : "完成后可以直接在右侧提问。"}
+            </small>
+          </div>
         </article>
       </section>
 
