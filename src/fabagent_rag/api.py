@@ -23,14 +23,9 @@ UPLOAD_CACHE_DIR = Path("data/uploads")
 
 
 class IngestRequest(BaseModel):
-    """HTTP 入库请求。
+    """HTTP 单文件路径入库请求。"""
 
-    API 传路径而不是上传文件，是为了先复用本地 CLI 的文件加载能力。
-    后续如果需要浏览器上传文件，可以再扩展 multipart endpoint。
-    """
-
-    path: str = Field(..., description="要入库的文件或目录路径")
-    pattern: str = Field(default="**/*", description="目录检索使用的 glob 模式")
+    path: str = Field(..., description="要入库的单个文件路径")
     batch_size: int = Field(default=10, ge=1, le=100, description="向量化和写入的批大小")
 
 
@@ -109,9 +104,11 @@ def ingest(request: IngestRequest) -> dict[str, object]:
     path = Path(request.path).expanduser()
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"路径不存在：{request.path}")
+    if not path.is_file():
+        raise HTTPException(status_code=400, detail="该接口只支持单文件路径入库。")
 
     settings = load_settings()
-    result = ingest_path(settings, path, request.pattern, request.batch_size)
+    result = ingest_path(settings, path, request.batch_size)
     return {**result, "sources": []}
 
 

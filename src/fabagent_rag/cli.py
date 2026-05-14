@@ -19,13 +19,14 @@ def main() -> None:
 
 @main.command()
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
-@click.option("--pattern", default="**/*", show_default=True, help="目录检索使用的 glob 模式。")
 @click.option("--batch-size", default=10, show_default=True, help="向量化和写入的批大小。")
-def ingest(path: Path, pattern: str, batch_size: int) -> None:
-    """将文本文件写入 Milvus。"""
+def ingest(path: Path, batch_size: int) -> None:
+    """将单个文档写入 Milvus。"""
     settings = load_settings()
     # CLI 只负责参数解析和输出；真正业务流程在 rag_service 中，FastAPI 也复用它。
-    result = ingest_path(settings, path, pattern, batch_size)
+    if not path.is_file():
+        raise click.ClickException("ingest 只支持单文件；批量文件请使用前端上传。")
+    result = ingest_path(settings, path, batch_size)
     click.echo(f"已从 {result['documents']} 个文档写入 {result['inserted']} 个分块。")
 
 

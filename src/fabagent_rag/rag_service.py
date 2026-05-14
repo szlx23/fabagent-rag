@@ -9,7 +9,7 @@ from fabagent_rag.chunking import (
     split_text,
 )
 from fabagent_rag.config import Settings
-from fabagent_rag.documents import load_documents
+from fabagent_rag.documents import load_document_text
 from fabagent_rag.embeddings import EmbeddingModel
 from fabagent_rag.llm import build_answer
 from fabagent_rag.milvus_store import MilvusStore
@@ -54,10 +54,10 @@ def build_chunk_config(
     )
 
 
-def ingest_path(settings: Settings, path: Path, pattern: str, batch_size: int) -> dict[str, int]:
-    """完整入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
+def ingest_path(settings: Settings, path: Path, batch_size: int) -> dict[str, int]:
+    """完整单文件入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
 
-    return ingest_documents(settings, load_documents(path, pattern), batch_size=batch_size)
+    return ingest_documents(settings, [(str(path), load_document_text(path))], batch_size=batch_size)
 
 
 def ingest_documents(

@@ -161,37 +161,10 @@ PARSERS_BY_EXTENSION: dict[str, DocumentParser] = {
 SUPPORTED_EXTENSIONS = set(PARSERS_BY_EXTENSION)
 
 
-def load_documents(path: Path, pattern: str) -> list[tuple[str, str]]:
-    """加载一个文件或目录，返回 `(source, text)` 列表。
-
-    外部调用仍保持旧接口，内部已变成：文件类型识别 -> 不同 Parser -> 统一中间格式。
-    """
-
-    parsed_documents = parse_documents(path, pattern)
-    return [(document.source, document.text) for document in parsed_documents]
-
-
-def parse_documents(path: Path, pattern: str) -> list[ParsedDocument]:
-    """解析文件或目录，返回统一中间格式列表。"""
-
-    if path.is_file():
-        return [parse_document(path, str(path))]
-
-    documents: list[ParsedDocument] = []
-    for file_path in sorted(path.glob(pattern)):
-        if (
-            file_path.is_file()
-            and not file_path.name.startswith("exclude__")
-            and file_path.suffix.lower() in SUPPORTED_EXTENSIONS
-        ):
-            documents.append(parse_document(file_path, str(file_path)))
-    return documents
-
-
 def load_document_text(path: Path) -> str:
     """把单个文档转换为可入库文本。
 
-    上传接口仍需要这个轻量函数：它先解析成 `ParsedDocument`，再取统一文本字段。
+    它先解析成 `ParsedDocument`，再取统一文本字段。
     """
 
     return parse_document(path, str(path)).text

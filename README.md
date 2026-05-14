@@ -147,8 +147,7 @@ chunk、embedding、Milvus 写入都复用同一套流程。
 ## 常用命令
 
 ```bash
-rag ingest data/raw --pattern "**/*.md"
-rag ingest data/raw --pattern "**/*.pdf"
+rag ingest data/raw/example.md
 rag ask "你的问题" --top-k 5
 uvicorn fabagent_rag.api:app --reload
 ./scripts/dev.sh
