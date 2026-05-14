@@ -20,7 +20,7 @@ def build_answer(
 
     client = OpenAI(api_key=api_key, base_url=base_url)
     context_text = "\n\n".join(
-        f"[{index + 1}] {item['source']}#{item['chunk_index']}\n{item['text']}"
+        f"[{index + 1}] {format_source_location(item)}\n{item['text']}"
         for index, item in enumerate(contexts)
     )
     try:
@@ -71,9 +71,22 @@ def format_contexts(contexts: list[dict[str, object]], reason: str | None = None
             "\n".join(
                 [
                     f"\n[{index}] 相似度={item['score']:.4f}",
-                    f"来源={item['source']}#{item['chunk_index']}",
+                    f"来源={format_source_location(item)}",
                     str(item["text"]),
                 ]
             )
         )
     return "\n".join(lines)
+
+
+def format_source_location(item: dict[str, object]) -> str:
+    """把 metadata 格式化为员工可读的位置描述。"""
+
+    parts = [str(item.get("source") or "未知来源")]
+    page = item.get("page")
+    if isinstance(page, int):
+        parts.append(f"第 {page} 页")
+    section_title = str(item.get("section_title") or "").strip()
+    if section_title:
+        parts.append(section_title)
+    return " / ".join(parts)

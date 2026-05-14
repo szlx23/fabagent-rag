@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from fabagent_rag.chunking import Chunk, ChunkConfig, batch, merge_small_text_chunks, split_text
+from fabagent_rag.chunking import (
+    Chunk,
+    ChunkConfig,
+    batch,
+    infer_section_title,
+    merge_small_text_chunks,
+    split_text,
+)
 from fabagent_rag.config import Settings
 from fabagent_rag.documents import load_documents
 from fabagent_rag.embeddings import EmbeddingModel
@@ -89,8 +96,14 @@ def ingest_manual_chunks(
     chunks = []
     for source, texts in documents:
         merged_texts = merge_small_text_chunks(texts, config)
+        document_text = "\n\n".join(merged_texts)
         chunks.extend(
-            Chunk(text=text.strip(), source=source, index=index)
+            Chunk(
+                text=text.strip(),
+                source=source,
+                index=index,
+                section_title=infer_section_title(document_text, text.strip()),
+            )
             for index, text in enumerate(merged_texts)
             if text.strip()
         )

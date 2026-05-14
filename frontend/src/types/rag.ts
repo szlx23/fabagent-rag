@@ -27,7 +27,8 @@ export type AskResponse = {
     source?: string;
     text?: string;
     score?: number;
-    chunk_index?: number;
+    page?: number | null;
+    section_title?: string;
     [key: string]: unknown;
   }>;
 };

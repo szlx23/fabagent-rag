@@ -9,6 +9,8 @@ class Chunk:
     text: str
     source: str
     index: int
+    page: int | None = None
+    section_title: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,12 @@ def split_text(text: str, source: str, config: ChunkConfig) -> list[Chunk]:
 
     merged_chunks = merge_small_text_chunks(raw_chunks, config)
     return [
-        Chunk(text=chunk_text, source=source, index=index)
+        Chunk(
+            text=chunk_text,
+            source=source,
+            index=index,
+            section_title=infer_section_title(clean_text, chunk_text),
+        )
         for index, chunk_text in enumerate(merged_chunks)
     ]
 
@@ -129,6 +136,31 @@ def can_merge(left: str, right: str, chunk_size: int) -> bool:
 
 def join_chunks(left: str, right: str) -> str:
     return f"{left.rstrip()}\n\n{right.lstrip()}".strip()
+
+
+def infer_section_title(document_text: str, chunk_text: str) -> str:
+    """从 Markdown 风格标题中推断 chunk 所属章节。
+
+    Parser 输出通常是 Markdown 或 Markdown-like 文本。这里选择离 chunk 最近的上方
+    标题作为员工可读的来源位置；找不到标题时返回空字符串。
+    """
+
+    chunk_start = document_text.find(chunk_text[: min(len(chunk_text), 80)])
+    if chunk_start < 0:
+        chunk_start = 0
+
+    section_title = ""
+    scanned = 0
+    for line in document_text.splitlines():
+        stripped = line.strip()
+        if scanned > chunk_start:
+            break
+        if stripped.startswith("#"):
+            title = stripped.lstrip("#").strip()
+            if title:
+                section_title = title
+        scanned += len(line) + 1
+    return section_title[:512]
 
 
 def batch(items: list[Chunk], size: int) -> Iterable[list[Chunk]]:

@@ -33,6 +33,18 @@ function getContextPreview(text: unknown) {
   return normalized.length > 96 ? `${normalized.slice(0, 96)}...` : normalized;
 }
 
+function getSourceLocation(context: AskResponse["contexts"][number]) {
+  const parts = [String(context.source ?? "未知来源")];
+  if (typeof context.page === "number") {
+    parts.push(`第 ${context.page} 页`);
+  }
+  const sectionTitle = String(context.section_title ?? "").trim();
+  if (sectionTitle) {
+    parts.push(sectionTitle);
+  }
+  return parts.join(" / ");
+}
+
 export function AskPanel() {
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(3);
@@ -147,7 +159,7 @@ export function AskPanel() {
                           <small>{context.score.toFixed(4)}</small>
                         )}
                       </span>
-                      <span className="contextSourceIndex">来源 {index + 1}</span>
+                      <span className="contextSourceIndex">{getSourceLocation(context)}</span>
                       <span className="contextPreview">{getContextPreview(context.text)}</span>
                     </button>
                   );
@@ -159,8 +171,11 @@ export function AskPanel() {
                   <div className="contextDetailHeader">
                     <div>
                       <strong>{String(selectedContext.source ?? "未知来源")}</strong>
-                      {typeof selectedContext.chunk_index === "number" && (
-                        <span>Chunk {selectedContext.chunk_index}</span>
+                      {typeof selectedContext.page === "number" && (
+                        <span>第 {selectedContext.page} 页</span>
+                      )}
+                      {String(selectedContext.section_title ?? "").trim() && (
+                        <span>{String(selectedContext.section_title)}</span>
                       )}
                     </div>
                     {typeof selectedContext.score === "number" && (
