@@ -1,5 +1,9 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
+import re
+
+
+_MARKDOWN_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
 
 @dataclass(frozen=True)
@@ -119,7 +123,9 @@ def merge_small_text_chunks(chunks: list[str], config: ChunkConfig) -> list[str]
             index += 1
             continue
 
-        if index + 1 < len(normalized) and can_merge(current, normalized[index + 1], config.chunk_size):
+        if index + 1 < len(normalized) and can_merge(
+            current, normalized[index + 1], config.chunk_size
+        ):
             merged.append(join_chunks(current, normalized[index + 1]))
             index += 2
             continue
@@ -141,26 +147,44 @@ def join_chunks(left: str, right: str) -> str:
 def infer_section_title(document_text: str, chunk_text: str) -> str:
     """从 Markdown 风格标题中推断 chunk 所属章节。
 
-    Parser 输出通常是 Markdown 或 Markdown-like 文本。这里选择离 chunk 最近的上方
-    标题作为员工可读的来源位置；找不到标题时返回空字符串。
+    Parser 输出通常是 Markdown 或 Markdown-like 文本。这里用标题栈记录当前位置：
+    `# 总章` 下的 `## 小节` 会输出 `总章 / 小节`，比单个最近标题更适合员工理解来源。
     """
 
     chunk_start = document_text.find(chunk_text[: min(len(chunk_text), 80)])
     if chunk_start < 0:
         chunk_start = 0
 
-    section_title = ""
+    heading_stack: dict[int, str] = {}
     scanned = 0
+    in_fenced_code = False
     for line in document_text.splitlines():
         stripped = line.strip()
         if scanned > chunk_start:
             break
-        if stripped.startswith("#"):
-            title = stripped.lstrip("#").strip()
-            if title:
-                section_title = title
+
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fenced_code = not in_fenced_code
+            scanned += len(line) + 1
+            continue
+
+        if not in_fenced_code:
+            match = _MARKDOWN_HEADING_PATTERN.match(stripped)
+            if match:
+                level = len(match.group(1))
+                title = match.group(2).strip()
+                heading_stack = {
+                    heading_level: heading_title
+                    for heading_level, heading_title in heading_stack.items()
+                    if heading_level < level
+                }
+                heading_stack[level] = title
         scanned += len(line) + 1
-    return section_title[:512]
+
+    return " / ".join(
+        heading_stack[level]
+        for level in sorted(heading_stack)
+    )[:512]
 
 
 def batch(items: list[Chunk], size: int) -> Iterable[list[Chunk]]:
