@@ -12,7 +12,6 @@ dependencies = [
     "click>=8.1.7",
     "docling>=2.50.0",
     "fastapi>=0.115.0",
-    "markdown-it-py>=3.0.0",
     "mineru[core]>=3.1.11,<4",
     "openai>=1.54.0",
     "openpyxl>=3.1.5",

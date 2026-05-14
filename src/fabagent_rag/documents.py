@@ -43,19 +43,10 @@ class NativeTextParser:
 
 
 class MarkdownParser:
-    """Markdown 文件保留原始 Markdown，同时用 parser 做一次语法读取校验。"""
+    """Markdown 文件和 TXT 一样直接读取，保留标题、列表、表格等原始标记。"""
 
     def parse(self, path: Path, source: str) -> ParsedDocument:
-        text = path.read_text(encoding="utf-8")
-
-        try:
-            from markdown_it import MarkdownIt
-        except ImportError as exc:
-            raise RuntimeError("解析 Markdown 需要安装 markdown-it-py。") from exc
-
-        # 这里不把 Markdown 转 HTML。RAG 检索更适合保留标题、列表、表格等原始标记。
-        MarkdownIt("commonmark", {"html": False}).parse(text)
-        return ParsedDocument(source=source, text=text, metadata={"format": "markdown"})
+        return ParsedDocument(source=source, text=path.read_text(encoding="utf-8"))
 
 
 class MinerUParser:

@@ -102,7 +102,7 @@ chunk、embedding、Milvus 写入都复用同一套流程。
 | DOC、PPT | LibreOffice 转换后交给 Docling | Markdown |
 | XLSX | pandas + openpyxl | Markdown 表格 |
 | TXT | native loader | 原始文本 |
-| MD、Markdown | markdown-it-py | 原始 Markdown |
+| MD、Markdown | native loader | 原始 Markdown |
 | HTML、HTM | trafilatura | Markdown-like 正文 |
 
 ## 配置
