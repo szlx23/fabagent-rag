@@ -250,42 +250,44 @@ Collection schema：
 
 ### 6. Query 处理策略
 
-当前 query 处理采用“两级意图门控”：规则先做快速初判，LLM 再复核成最终意图。
+当前 query 处理采用“LLM 优先，规则兜底”的意图识别策略。
 
 当前流程：
 
 1. 用户输入原始问题
-2. 使用规则识别意图：`lookup`、`summarize`、`chat`
-3. LLM 用严格 JSON 复核规则结果，得到最终意图
+2. 优先让 LLM 用严格 JSON 判断意图：`lookup`、`summarize`、`chat`
+3. 如果 LLM 未配置、调用失败或返回无法解析，使用规则意图识别兜底
 4. 最终意图为 `chat`：不检索 Milvus，直接闲聊回答
-5. 最终意图为 `lookup`/`summarize`：再执行 Milvus 检索
+5. 最终意图为 `lookup`/`summarize`：执行 Milvus 检索
 6. 把召回上下文交给推理模型生成回答
 
-规则策略：
+规则兜底策略：
 
 - 包含“总结、概括、归纳、摘要、梳理”等关键词时，识别为 `summarize`
 - 明确的问候、感谢、自我介绍、闲聊表达，识别为 `chat`
 - 其他问题默认识别为 `lookup`
 
-这里故意默认走 `lookup`。如果规则判断不准，走知识库检索比误走闲聊更符合当前项目目标。
+规则只作为兜底，不作为主判断器。这里故意默认走 `lookup`，因为 LLM 不可用时，
+误走知识库检索比误把资料问题当成闲聊更符合当前项目目标。
 
 示意图：
 
 ```mermaid
 flowchart TD
-    A[用户问题] --> B[规则意图识别]
-    B --> C[LLM 复核意图]
-    C --> D{最终意图}
-    D -->|chat| E[直接闲聊回答]
-    D -->|lookup / summarize| F[Milvus 检索]
+    A[用户问题] --> B[LLM 意图识别]
+    B -->|成功| C{最终意图}
+    B -->|失败 / 无配置 / 解析失败| D[规则兜底识别]
+    D --> C
+    C -->|chat| E[直接闲聊回答]
+    C -->|lookup / summarize| F[Milvus 检索]
     F --> G[基于上下文回答]
 ```
 
-LLM 复核策略：
+LLM 意图识别策略：
 
 - 只允许输出 `lookup`、`summarize`、`chat`
 - 要求返回 JSON：`{"intent":"lookup"}`
-- 如果没有配置推理模型、模型调用失败、返回内容解析失败，就回退到规则结果
+- 如果没有配置推理模型、模型调用失败、返回内容解析失败，就回退到规则兜底
 - 只有最终意图为 `lookup` 或 `summarize` 时才会访问 Milvus
 - 对 RAG 类问题，回答生成仍然受“只能根据召回上下文回答”的约束
 

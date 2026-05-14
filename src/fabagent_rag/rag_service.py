@@ -139,19 +139,16 @@ def ingest_chunks(
 
 
 def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, object]:
-    """完整问答流程：规则初判，LLM 复核后再决定是否检索。"""
+    """完整问答流程：LLM 优先判断意图，失败时用规则兜底。"""
 
-    rule_intent = detect_intent(question)
     intent = classify_intent_with_llm(
         question,
-        rule_intent,
         settings.inference_api_key,
         settings.inference_base_url,
         settings.inference_model,
-    )
+    ) or detect_intent(question)
 
-    # 最终 intent 为 chat 时不访问 Milvus。这样规则误判为 lookup 的闲聊问题，
-    # 不会浪费检索，也不会把无关上下文带进回答。
+    # 最终 intent 为 chat 时不访问 Milvus，避免把无关上下文带进闲聊回答。
     if intent == "chat":
         answer = build_chat_answer(
             question,

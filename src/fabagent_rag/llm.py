@@ -3,24 +3,23 @@ import json
 from openai import OpenAI
 from openai import OpenAIError
 
-from fabagent_rag.intent import Intent, normalize_intent
+from fabagent_rag.intent import INTENT_VALUES, Intent
 
 
 def classify_intent_with_llm(
     question: str,
-    rule_intent: Intent,
     api_key: str,
     base_url: str,
     model: str,
-) -> Intent:
-    """用 LLM 对规则意图做一次轻量复核。
+) -> Intent | None:
+    """优先用 LLM 判断用户问题应该走哪条路径。
 
-    这一步只允许模型在三种意图里选择，不让它直接生成业务回答。解析失败或模型不可用时，
-    回退到规则结果，保证问答链路不会因为意图识别增强而中断。
+    这一步只允许模型在三种意图里选择，不让它直接生成业务回答。解析失败或模型不可用时
+    返回 None，由调用方使用规则兜底。
     """
 
     if not api_key or not base_url or not model:
-        return rule_intent
+        return None
 
     client = OpenAI(api_key=api_key, base_url=base_url)
     try:
@@ -41,7 +40,6 @@ def classify_intent_with_llm(
                 {
                     "role": "user",
                     "content": (
-                        f"规则识别结果：{rule_intent}\n"
                         f"用户问题：{question}\n"
                         '请只返回：{"intent":"lookup|summarize|chat"}'
                     ),
@@ -50,21 +48,21 @@ def classify_intent_with_llm(
             temperature=0,
         )
     except OpenAIError:
-        return rule_intent
+        return None
 
     if not response.choices:
-        return rule_intent
+        return None
 
     content = response.choices[0].message.content or ""
-    return parse_intent_json(content, rule_intent)
+    return parse_intent_json(content)
 
 
-def parse_intent_json(content: str, fallback: Intent) -> Intent:
+def parse_intent_json(content: str) -> Intent | None:
     """解析 LLM 返回的最小 JSON，兼容模型偶尔包一层说明文本的情况。"""
 
     stripped = content.strip()
     if not stripped:
-        return fallback
+        return None
 
     try:
         payload = json.loads(stripped)
@@ -72,16 +70,19 @@ def parse_intent_json(content: str, fallback: Intent) -> Intent:
         start = stripped.find("{")
         end = stripped.rfind("}")
         if start == -1 or end == -1 or end <= start:
-            return fallback
+            return None
         try:
             payload = json.loads(stripped[start : end + 1])
         except json.JSONDecodeError:
-            return fallback
+            return None
 
     if not isinstance(payload, dict):
-        return fallback
+        return None
 
-    return normalize_intent(payload.get("intent"), fallback)
+    intent = str(payload.get("intent") or "").strip().lower()
+    if intent in INTENT_VALUES:
+        return intent  # type: ignore[return-value]
+    return None
 
 
 def build_chat_answer(
