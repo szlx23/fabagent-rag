@@ -57,7 +57,11 @@ def build_chunk_config(
 def ingest_path(settings: Settings, path: Path, batch_size: int) -> dict[str, int]:
     """完整单文件入库流程：解析文档 -> 切块 -> 向量化 -> 写入 Milvus。"""
 
-    return ingest_documents(settings, [(str(path), load_document_text(path))], batch_size=batch_size)
+    return ingest_documents(
+        settings,
+        [(str(path), load_document_text(path, mineru_device=settings.mineru_device))],
+        batch_size=batch_size,
+    )
 
 
 def ingest_documents(

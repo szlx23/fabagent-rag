@@ -6,7 +6,7 @@ import tempfile
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from fabagent_rag.config import load_settings
+from fabagent_rag.config import Settings, load_settings
 from fabagent_rag.documents import load_document_text
 from fabagent_rag.rag_service import (
     answer_question,
@@ -122,8 +122,8 @@ def ingest_upload(
     写入项目临时目录，并保留文件后缀，保证 PDF/Office/图片能按类型解析。
     """
 
-    documents = parse_uploaded_files(files)
     settings = load_settings()
+    documents = parse_uploaded_files(files, settings)
     result = ingest_documents(settings, documents)
     return {**result, "sources": [source for source, _ in documents]}
 
@@ -137,7 +137,7 @@ def parse_upload(
     手动分块需要先让前端拿到统一文本，再由用户决定 chunk 边界。
     """
 
-    documents = parse_uploaded_files(files)
+    documents = parse_uploaded_files(files, load_settings())
     return {
         "documents": [
             {"source": source, "text": text}
@@ -171,7 +171,7 @@ def ask(request: AskRequest) -> dict[str, object]:
     return answer_question(settings, request.question, request.top_k)
 
 
-def parse_uploaded_files(files: list[UploadFile]) -> list[tuple[str, str]]:
+def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[tuple[str, str]]:
     """把上传文件保存到临时目录后解析成统一文本。"""
 
     if not files:
@@ -191,7 +191,9 @@ def parse_uploaded_files(files: list[UploadFile]) -> list[tuple[str, str]]:
             try:
                 with temp_path.open("wb") as target:
                     shutil.copyfileobj(upload.file, target)
-                documents.append((source, load_document_text(temp_path)))
+                documents.append(
+                    (source, load_document_text(temp_path, mineru_device=settings.mineru_device))
+                )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:

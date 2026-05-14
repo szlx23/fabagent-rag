@@ -13,6 +13,10 @@ import tempfile
 # MinerU 会生成 Markdown、图片和中间 JSON。这里使用项目内的缓存目录，
 # 并在 .gitignore 中忽略，避免把解析产物提交到仓库。
 MINERU_CACHE_DIR = Path("data/mineru")
+MINERU_BACKENDS_BY_DEVICE = {
+    "cpu": "pipeline",
+    "gpu": "hybrid-auto-engine",
+}
 
 
 @dataclass(frozen=True)
@@ -52,10 +56,13 @@ class MarkdownParser:
 class MinerUParser:
     """PDF/图片走 MinerU，保留版面解析后的 Markdown。"""
 
+    def __init__(self, device: str) -> None:
+        self.device = device
+
     def parse(self, path: Path, source: str) -> ParsedDocument:
         return ParsedDocument(
             source=source,
-            text=parse_with_mineru(path),
+            text=parse_with_mineru(path, self.device),
             metadata={"parser": "mineru"},
         )
 
@@ -110,7 +117,7 @@ class PandasExcelParser:
         sheets = pd.read_excel(path, sheet_name=None, dtype=str, keep_default_na=False)
         sections: list[str] = []
         for sheet_name, frame in sheets.items():
-            sections.append(f"## Sheet: {sheet_name}\n\n{dataframe_to_markdown(frame)}")
+            sections.append(f"## Sheet: {sheet_name}\n\n{frame.to_markdown(index=False)}")
 
         return ParsedDocument(
             source=source,
@@ -145,10 +152,6 @@ PARSERS_BY_EXTENSION: dict[str, DocumentParser] = {
     ".txt": NativeTextParser(),
     ".md": MarkdownParser(),
     ".markdown": MarkdownParser(),
-    ".pdf": MinerUParser(),
-    ".png": MinerUParser(),
-    ".jpg": MinerUParser(),
-    ".jpeg": MinerUParser(),
     ".doc": LegacyOfficeParser(),
     ".docx": DoclingParser(),
     ".ppt": LegacyOfficeParser(),
@@ -158,50 +161,31 @@ PARSERS_BY_EXTENSION: dict[str, DocumentParser] = {
     ".htm": HtmlParser(),
 }
 
-SUPPORTED_EXTENSIONS = set(PARSERS_BY_EXTENSION)
+MINERU_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+SUPPORTED_EXTENSIONS = set(PARSERS_BY_EXTENSION) | MINERU_EXTENSIONS
 
 
-def load_document_text(path: Path) -> str:
+def load_document_text(path: Path, mineru_device: str = "cpu") -> str:
     """把单个文档转换为可入库文本。
 
     它先解析成 `ParsedDocument`，再取统一文本字段。
     """
 
-    return parse_document(path, str(path)).text
+    return parse_document(path, str(path), mineru_device=mineru_device).text
 
 
-def parse_document(path: Path, source: str) -> ParsedDocument:
+def parse_document(path: Path, source: str, mineru_device: str = "cpu") -> ParsedDocument:
     """根据文件扩展名选择 Parser，并输出统一中间格式。"""
 
     suffix = path.suffix.lower()
+    if suffix in MINERU_EXTENSIONS:
+        return MinerUParser(mineru_device).parse(path, source)
+
     parser = PARSERS_BY_EXTENSION.get(suffix)
     if not parser:
         raise ValueError(f"不支持的文件类型：{path.suffix}")
     return parser.parse(path, source)
-
-
-def dataframe_to_markdown(frame: "object") -> str:
-    """把 pandas DataFrame 转成 Markdown 表格。
-
-    不使用 `DataFrame.to_markdown()`，是为了避免额外依赖 tabulate，并让 Excel 解析
-    只依赖 pandas/openpyxl。
-    """
-
-    columns = [str(column) for column in frame.columns]
-    rows = frame.astype(str).values.tolist()
-    table = [
-        "| " + " | ".join(escape_markdown_cell(column) for column in columns) + " |",
-        "| " + " | ".join("---" for _ in columns) + " |",
-    ]
-    for row in rows:
-        table.append("| " + " | ".join(escape_markdown_cell(cell) for cell in row) + " |")
-    return "\n".join(table)
-
-
-def escape_markdown_cell(value: object) -> str:
-    """转义 Markdown 表格单元格中的竖线和换行。"""
-
-    return str(value).replace("|", "\\|").replace("\n", "<br>")
 
 
 def convert_legacy_office(path: Path, target_extension: str) -> Path:
@@ -245,7 +229,7 @@ def find_office_converter() -> str | None:
     return shutil.which("libreoffice") or shutil.which("soffice")
 
 
-def parse_with_mineru(path: Path) -> str:
+def parse_with_mineru(path: Path, device: str) -> str:
     """调用 MinerU CLI，把 PDF 解析成 Markdown 文本。
 
     这里没有直接使用 MinerU 的内部 Python API，原因是 CLI 是它最稳定的公开接口之一；
@@ -255,6 +239,9 @@ def parse_with_mineru(path: Path) -> str:
     mineru = find_mineru_command()
     if not mineru:
         raise RuntimeError("未找到 mineru 命令，请先在当前环境安装 MinerU。")
+    backend = MINERU_BACKENDS_BY_DEVICE.get(device)
+    if not backend:
+        raise RuntimeError(f"MINERU_DEVICE 只能设置为 cpu 或 gpu，当前值为 {device!r}。")
 
     MINERU_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=MINERU_CACHE_DIR) as temp_dir:
@@ -268,10 +255,8 @@ def parse_with_mineru(path: Path) -> str:
                 str(path),
                 "-o",
                 str(output_dir),
-                # pipeline 后端适合 CPU-only 机器。不要使用默认 hybrid-auto-engine，
-                # 默认后端更偏向高精度本地模型，可能触发更重的计算依赖。
                 "-b",
-                "pipeline",
+                backend,
                 # 公式解析通常会明显增加耗时。当前 RAG 目标是术语/文档问答，
                 # 先关闭公式，表格保留为 Markdown，有利于检索。
                 "--formula",
