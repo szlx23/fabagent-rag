@@ -77,6 +77,7 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     question: str
     intent: str
+    query_plan: dict[str, object] | None = None
     answer: str
     contexts: list[dict[str, object]]
 

@@ -14,6 +14,7 @@ from fabagent_rag.embeddings import EmbeddingModel
 from fabagent_rag.intent import detect_intent
 from fabagent_rag.llm import build_answer, build_chat_answer, classify_intent_with_llm
 from fabagent_rag.milvus_store import MilvusStore
+from fabagent_rag.query_planner import QueryPlan, build_query_plan
 
 
 def build_embedder(settings: Settings) -> EmbeddingModel:
@@ -159,11 +160,19 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
         return {
             "question": question,
             "intent": intent,
+            "query_plan": None,
             "answer": answer,
             "contexts": [],
         }
 
-    contexts = search_contexts(settings, question, top_k)
+    query_plan = build_query_plan(
+        question,
+        intent,
+        settings.inference_api_key,
+        settings.inference_base_url,
+        settings.inference_model,
+    )
+    contexts = search_contexts(settings, query_plan, top_k)
     answer = build_answer(
         question,
         contexts,
@@ -174,15 +183,45 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
     return {
         "question": question,
         "intent": intent,
+        "query_plan": query_plan.to_dict(),
         "answer": answer,
         "contexts": contexts,
     }
 
 
-def search_contexts(settings: Settings, question: str, top_k: int) -> list[dict[str, object]]:
-    """把问题向量化后到 Milvus 召回上下文。"""
+def search_contexts(
+    settings: Settings,
+    query_plan: QueryPlan,
+    top_k: int,
+) -> list[dict[str, object]]:
+    """使用 Query Plan 中的多个 query 召回上下文，并合并去重。"""
 
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
-    query_embedding = embedder.encode([question])[0]
-    return store.search(query_embedding, top_k=top_k)
+    queries = query_plan.queries()
+    embeddings = embedder.encode(queries)
+
+    candidates: dict[tuple[object, object, object, object], dict[str, object]] = {}
+    for query, embedding in zip(queries, embeddings, strict=True):
+        for context in store.search(embedding, top_k=top_k):
+            context_with_query = {**context, "matched_query": query}
+            key = (
+                context_with_query.get("source"),
+                context_with_query.get("page"),
+                context_with_query.get("section_title"),
+                context_with_query.get("text"),
+            )
+            existing = candidates.get(key)
+            if existing is None or score_of(context_with_query) > score_of(existing):
+                candidates[key] = context_with_query
+
+    return sorted(candidates.values(), key=score_of, reverse=True)[:top_k]
+
+
+def score_of(context: dict[str, object]) -> float:
+    """读取召回结果分数，用于多 query 结果合并排序。"""
+
+    score = context.get("score")
+    if isinstance(score, int | float):
+        return float(score)
+    return 0.0

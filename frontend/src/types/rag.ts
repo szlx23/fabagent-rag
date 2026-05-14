@@ -23,6 +23,13 @@ export type ChunkConfig = {
 export type AskResponse = {
   question: string;
   intent: "lookup" | "summarize" | "chat";
+  query_plan?: {
+    original_query?: string;
+    rewritten_query?: string;
+    expanded_queries?: string[];
+    queries?: string[];
+    [key: string]: unknown;
+  } | null;
   answer: string;
   contexts: Array<{
     source?: string;

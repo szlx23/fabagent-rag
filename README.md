@@ -258,8 +258,9 @@ Collection schema：
 2. 优先让 LLM 用严格 JSON 判断意图：`lookup`、`summarize`、`chat`
 3. 如果 LLM 未配置、调用失败或返回无法解析，使用规则意图识别兜底
 4. 最终意图为 `chat`：不检索 Milvus，直接闲聊回答
-5. 最终意图为 `lookup`/`summarize`：执行 Milvus 检索
-6. 把召回上下文交给推理模型生成回答
+5. 最终意图为 `lookup`/`summarize`：生成 Query Plan
+6. 使用原问题、重写 query、扩写 query 执行多路检索
+7. 合并去重后，把召回上下文交给推理模型生成回答
 
 规则兜底策略：
 
@@ -279,8 +280,10 @@ flowchart TD
     B -->|失败 / 无配置 / 解析失败| D[规则兜底识别]
     D --> C
     C -->|chat| E[直接闲聊回答]
-    C -->|lookup / summarize| F[Milvus 检索]
-    F --> G[基于上下文回答]
+    C -->|lookup / summarize| F[Query Plan]
+    F --> G[多 query 检索]
+    G --> H[合并去重]
+    H --> I[基于上下文回答]
 ```
 
 LLM 意图识别策略：
@@ -291,10 +294,17 @@ LLM 意图识别策略：
 - 只有最终意图为 `lookup` 或 `summarize` 时才会访问 Milvus
 - 对 RAG 类问题，回答生成仍然受“只能根据召回上下文回答”的约束
 
+Query Plan 策略：
+
+- `original_query`：保留用户原始问题，保证不丢失真实意图
+- `rewritten_query`：让 LLM 改写成更短、更适合向量检索的查询
+- `expanded_queries`：补充同义词、英文缩写、行业写法差异
+- `lookup` 最多扩写 3 条
+- `summarize` 通常不扩写，最多扩写 1 条
+- Query Plan 生成失败时，只使用原问题检索
+
 当前尚未实现：
 
-- query rewrite
-- query expansion
 - 多轮对话历史压缩
 - HyDE
 - 关键词检索和向量检索混合召回
@@ -309,6 +319,9 @@ LLM 意图识别策略：
 - 搜索字段：`embedding`
 - 返回字段：`source`、`page`、`section_title`、`text`
 - `top_k` 由 CLI 或前端控制，默认前端为 3，API 默认值为 4
+- 每个 Query Plan 中的 query 都会独立检索
+- 多路检索结果按 `source + page + section_title + text` 去重
+- 重复 chunk 保留最高 score
 - score 使用 Milvus 返回的 distance/score
 
 当前尚未实现：
