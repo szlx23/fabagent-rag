@@ -13,10 +13,6 @@ import tempfile
 # MinerU 会生成 Markdown、图片和中间 JSON。这里使用项目内的缓存目录，
 # 并在 .gitignore 中忽略，避免把解析产物提交到仓库。
 MINERU_CACHE_DIR = Path("data/mineru")
-MINERU_BACKENDS_BY_DEVICE = {
-    "cpu": "pipeline",
-    "gpu": "hybrid-auto-engine",
-}
 
 
 @dataclass(frozen=True)
@@ -56,13 +52,13 @@ class MarkdownParser:
 class MinerUParser:
     """PDF/图片走 MinerU，保留版面解析后的 Markdown。"""
 
-    def __init__(self, device: str) -> None:
-        self.device = device
+    def __init__(self, backend: str) -> None:
+        self.backend = backend
 
     def parse(self, path: Path, source: str) -> ParsedDocument:
         return ParsedDocument(
             source=source,
-            text=parse_with_mineru(path, self.device),
+            text=parse_with_mineru(path, self.backend),
             metadata={"parser": "mineru"},
         )
 
@@ -166,21 +162,21 @@ MINERU_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 SUPPORTED_EXTENSIONS = set(PARSERS_BY_EXTENSION) | MINERU_EXTENSIONS
 
 
-def load_document_text(path: Path, mineru_device: str = "cpu") -> str:
+def load_document_text(path: Path, mineru_backend: str = "pipeline") -> str:
     """把单个文档转换为可入库文本。
 
     它先解析成 `ParsedDocument`，再取统一文本字段。
     """
 
-    return parse_document(path, str(path), mineru_device=mineru_device).text
+    return parse_document(path, str(path), mineru_backend=mineru_backend).text
 
 
-def parse_document(path: Path, source: str, mineru_device: str = "cpu") -> ParsedDocument:
+def parse_document(path: Path, source: str, mineru_backend: str = "pipeline") -> ParsedDocument:
     """根据文件扩展名选择 Parser，并输出统一中间格式。"""
 
     suffix = path.suffix.lower()
     if suffix in MINERU_EXTENSIONS:
-        return MinerUParser(mineru_device).parse(path, source)
+        return MinerUParser(mineru_backend).parse(path, source)
 
     parser = PARSERS_BY_EXTENSION.get(suffix)
     if not parser:
@@ -229,7 +225,7 @@ def find_office_converter() -> str | None:
     return shutil.which("libreoffice") or shutil.which("soffice")
 
 
-def parse_with_mineru(path: Path, device: str) -> str:
+def parse_with_mineru(path: Path, backend: str) -> str:
     """调用 MinerU CLI，把 PDF 解析成 Markdown 文本。
 
     这里没有直接使用 MinerU 的内部 Python API，原因是 CLI 是它最稳定的公开接口之一；
@@ -239,9 +235,6 @@ def parse_with_mineru(path: Path, device: str) -> str:
     mineru = find_mineru_command()
     if not mineru:
         raise RuntimeError("未找到 mineru 命令，请先在当前环境安装 MinerU。")
-    backend = MINERU_BACKENDS_BY_DEVICE.get(device)
-    if not backend:
-        raise RuntimeError(f"MINERU_DEVICE 只能设置为 cpu 或 gpu，当前值为 {device!r}。")
 
     MINERU_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=MINERU_CACHE_DIR) as temp_dir:

@@ -192,7 +192,7 @@ def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[tu
                 with temp_path.open("wb") as target:
                     shutil.copyfileobj(upload.file, target)
                 documents.append(
-                    (source, load_document_text(temp_path, mineru_device=settings.mineru_device))
+                    (source, load_document_text(temp_path, mineru_backend=settings.mineru_backend))
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc

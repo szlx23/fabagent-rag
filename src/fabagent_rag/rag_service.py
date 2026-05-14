@@ -59,7 +59,7 @@ def ingest_path(settings: Settings, path: Path, batch_size: int) -> dict[str, in
 
     return ingest_documents(
         settings,
-        [(str(path), load_document_text(path, mineru_device=settings.mineru_device))],
+        [(str(path), load_document_text(path, mineru_backend=settings.mineru_backend))],
         batch_size=batch_size,
     )
 

@@ -118,7 +118,7 @@ chunk、embedding、Milvus 写入都复用同一套流程。
 | `EMBEDDING_BASE_URL` | 空 | 嵌入模型 OpenAI 兼容接口地址 |
 | `EMBEDDING_MODEL` | `doubao-embedding-text-240715` | 嵌入模型名称 |
 | `MINERU_MODEL_SOURCE` | `modelscope` | MinerU 模型下载源；国内环境建议使用 `modelscope` |
-| `MINERU_DEVICE` | `cpu` | MinerU 执行设备；`cpu` 使用 `pipeline`，`gpu` 使用 `hybrid-auto-engine` |
+| `MINERU_BACKEND` | `pipeline` | MinerU 解析后端；可选 `pipeline`、`vlm-http-client`、`hybrid-http-client`、`vlm-auto-engine`、`hybrid-auto-engine` |
 | `CHUNK_SIZE` | `800` | 文档分块字符数 |
 | `CHUNK_OVERLAP` | `120` | 文档分块重叠字符数 |
 | `MIN_CHUNK_SIZE` | `160` | 小 chunk 阈值；低于该值时会尝试与前后 chunk 合并 |

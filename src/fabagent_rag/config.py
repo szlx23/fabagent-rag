@@ -5,7 +5,13 @@ import re
 from dotenv import load_dotenv
 
 _MILVUS_COLLECTION_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
-_MINERU_DEVICES = {"cpu", "gpu"}
+_MINERU_BACKENDS = {
+    "pipeline",
+    "vlm-http-client",
+    "hybrid-http-client",
+    "vlm-auto-engine",
+    "hybrid-auto-engine",
+}
 
 
 @dataclass(frozen=True)
@@ -26,7 +32,7 @@ class Settings:
     chunk_size: int
     chunk_overlap: int
     min_chunk_size: int
-    mineru_device: str
+    mineru_backend: str
     inference_api_key: str
     inference_base_url: str
     inference_model: str
@@ -48,9 +54,13 @@ def load_settings() -> Settings:
             "MILVUS_COLLECTION 只能包含数字、字母和下划线，"
             f"当前值为 {milvus_collection!r}"
         )
-    mineru_device = os.getenv("MINERU_DEVICE", "cpu").lower()
-    if mineru_device not in _MINERU_DEVICES:
-        raise ValueError(f"MINERU_DEVICE 只能设置为 cpu 或 gpu，当前值为 {mineru_device!r}")
+    mineru_backend = os.getenv("MINERU_BACKEND", "pipeline")
+    if mineru_backend not in _MINERU_BACKENDS:
+        allowed_backends = ", ".join(sorted(_MINERU_BACKENDS))
+        raise ValueError(
+            f"MINERU_BACKEND 必须是以下值之一：{allowed_backends}，"
+            f"当前值为 {mineru_backend!r}"
+        )
 
     return Settings(
         milvus_host=os.getenv("MILVUS_HOST", "localhost"),
@@ -65,7 +75,7 @@ def load_settings() -> Settings:
         chunk_size=int(os.getenv("CHUNK_SIZE", "800")),
         chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "120")),
         min_chunk_size=int(os.getenv("MIN_CHUNK_SIZE", "160")),
-        mineru_device=mineru_device,
+        mineru_backend=mineru_backend,
         inference_api_key=os.getenv("ARK_API_KEY", ""),
         inference_base_url=os.getenv("ARK_CODING_PLAN_BASE_URL", ""),
         inference_model=os.getenv("INFERENCE_MODEL", ""),
