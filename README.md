@@ -115,6 +115,7 @@ flowchart LR
 
     subgraph Query[查询链路]
         Q[用户问题] --> I[意图识别]
+        S[已入库文档选择] --> R
         I --> P[Query Plan]
         P --> R[混合检索]
         R --> M[上下文合并]
@@ -297,10 +298,13 @@ flowchart LR
     A[Chunk]
     A --> B[向量字段]
     A --> C[文本字段]
+    A --> G[文档 metadata]
     B --> D[(Milvus)]
     C --> E[(BM25)]
+    G --> E
     D --> F[混合召回]
     E --> F
+    E --> H[已入库文档列表]
 ```
 
 Collection schema：
@@ -369,8 +373,10 @@ flowchart LR
 ```mermaid
 flowchart LR
     A[Query Plan] --> B[原问题 / 重写 query / 扩写 query]
-    B --> C[向量检索]
-    B --> D[BM25]
+    S[已选择 source] --> C
+    S --> D
+    B --> C[Milvus 向量检索]
+    B --> D[BM25 关键词检索]
     C --> E[vector_score]
     D --> F[keyword_score]
     E --> G[chunk_id 去重]
@@ -386,6 +392,7 @@ flowchart LR
 - `top_k` 由 CLI 或前端控制，默认前端为 3，API 默认值为 4
 - 每个 Query Plan 中的 query 都会独立检索
 - 每个 query 同时执行向量检索和 BM25 检索
+- 如果前端选择了文件，source filter 会同时作用于 Milvus 和 BM25
 - 多路检索结果优先按 `chunk_id` 去重
 - 重复 chunk 会合并 `vector_score` 和 `keyword_score`
 - 最终 `score` 是按 intent 加权后的融合分数
@@ -408,6 +415,7 @@ BM25 策略：
 优化点：
 
 - 混合检索而不是单纯向量召回，编号、表格、字段名更稳
+- 文档范围选择基于已入库 metadata，不直接扫描 `data/raw`
 - 用意图权重区分 lookup 和 summarize，而不是所有问题一套权重
 - FTS5 让关键词检索保持轻量，不额外引入复杂依赖
 
@@ -513,6 +521,15 @@ flowchart LR
 ### 10. 前端交互策略
 
 当前前端是一个 RAG 工作台：
+
+```mermaid
+flowchart LR
+    A[GET /documents] --> B[已入库文档列表]
+    B --> C[用户选择 source]
+    C --> D[POST /ask selected_sources]
+    D --> E[限定范围检索]
+    E --> F[回答 + 来源核对]
+```
 
 - 左侧负责文件上传、自动入库、手动 chunk
 - 右侧负责检索问答和来源核对
