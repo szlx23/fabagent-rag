@@ -456,32 +456,59 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[固定语料 / 固定问题集] --> B[Parse]
-    A --> C[Chunk]
-    A --> D[Retrieval]
-    A --> E[Answer]
-    B --> F[解析成功率 / 空文本率]
-    C --> G[长度分布 / 标题继承]
-    D --> H[source 命中 / MRR / top-k]
-    E --> I[groundedness / 无答案处理]
-    F --> J[Report]
-    G --> J
-    H --> J
-    I --> J
+    A[rag_eval_set.jsonl] --> B[引用 source]
+    B --> C[Parse]
+    C --> D[Chunk]
+    A --> E[Retrieval]
+    A --> F[Answer]
+    C --> G[parse_rows / parse summary]
+    D --> H[chunk_rows / chunk summary]
+    E --> I[retrieval_rows / retrieval summary]
+    F --> J[answer_rows / answer summary]
+    G --> K[Report]
+    H --> K
+    I --> K
+    J --> K
 ```
 
-当前实现：
+测试数据覆盖：
 
-- `parse`：看不同文件类型是否成功解析
-- `chunk`：看 chunk 数量、长度分布和标题继承是否合理
-- `retrieval`：看是否命中目标 source、MRR 和 top-k 命中
-- `answer`：看答案是否基于召回上下文，是否把无答案问题说清楚
+- 文件类型：MD、DOC、DOCX、PPT、PPTX、PDF、XLSX
+- 问题类型：概念解释、英文缩写、操作步骤、SOP、故障处理、参数查询、表格问答、总结题、无答案问题、闲聊分流
+- 业务内容：OPC、FEOL/BEOL、洁净室制度、刻蚀报警、MES Hold Lot、recipe 参数、SPC 报表、设备点检、ICP-RIE / HF / PECVD 操作、光刻培训、芯片工艺流程
+- 评测依据：每条样例绑定 `expected_sources` 和 `expected_answer_contains`，避免构造没有来源支撑的问题
+
+指标计算方式：
+
+| 阶段 | 指标 | 具体计算方式 |
+| --- | --- | --- |
+| `parse` | `success_rate` | `status == "ok"` 的文件数 / 被评测 source 总数 |
+| `parse` | `empty_count` | 解析成功但 `len(text) == 0` 的文件数 |
+| `parse` | `avg_chars` | 解析成功文件的文本字符数均值 |
+| `parse` | `parser_counts` | 成功文件按 `parser` 统计数量 |
+| `chunk` | `avg_chunk_count` | 每个 source 生成 chunk 数量的均值 |
+| `chunk` | `avg_chunk_chars` | 每个 source 的平均 chunk 字符数，再取均值 |
+| `chunk` | `section_title_coverage` | 有 `section_title` 的 chunk 数 / chunk 总数 |
+| `chunk` | `table_chunk_ratio` | `content_type == "table"` 的 chunk 数 / chunk 总数 |
+| `chunk` | `short_chunk_ratio` | 长度小于 `MIN_CHUNK_SIZE` 的 chunk 数 / chunk 总数 |
+| `retrieval` | `intent_accuracy` | 最终 intent 等于评测集期望 intent 的题数 / 有效题数 |
+| `retrieval` | `*_hit_rate` | top-k contexts 中命中任一 `expected_sources` 的题数 / 有效题数 |
+| `retrieval` | `*_mrr` | 第一条命中 `expected_sources` 的排名倒数，未命中为 0，再取均值 |
+| `retrieval` | `planner_improvement_rate` | planned hybrid MRR 高于 original query MRR 的题数 / 有效题数 |
+| `answer` | `pass_rate` | 按题型规则通过的题数 / 有效题数 |
+| `answer` | `source_hit_rate` | 回答使用的 contexts 命中 `expected_sources` 的题数 / 有效题数 |
+| `answer` | `avg_keyword_hit_ratio` | 答案命中 `expected_answer_contains` 的比例均值 |
+| `answer` | `no_answer_pass_rate` | 无答案题中回答包含“资料不足”等提示的比例 |
+| `answer` | `chat_pass_rate` | 闲聊题中不返回 contexts 且回答符合预期的比例 |
+
+端到端回答的通过规则比较保守：普通 RAG 题需要 intent 正确、source 命中，并覆盖至少一部分期望关键词；无答案题需要明确说明资料不足；闲聊题不能带检索上下文。
 
 优化点：
 
 - 把“能不能答”拆成“解析、切块、召回、生成”四层分别测
 - 评估集绑定真实文件和真实解析结果，避免幻觉样本
-- 同一套问题集可同时做 smoke test 和回归测试
+- 同时比较 original query、vector、keyword、hybrid 和 planned query，能看出 query plan 与混合检索是否真的带来收益
+- 同一套问题集可通过 `--case-limit` 做 smoke test，也可以全量跑回归测试
 
 ### 10. 前端交互策略
 
