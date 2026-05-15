@@ -13,6 +13,7 @@ data/milvus/
 data/mineru/
 data/uploads/
 data/indexes/
+data/eval/parse_chunk_dry_run*/
 data/raw/*
 !data/raw/.gitkeep
 data/semi-document/
