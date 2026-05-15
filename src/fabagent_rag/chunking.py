@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
+from hashlib import sha1
 import re
 
 
@@ -445,6 +446,13 @@ def infer_sheet_name(section_title: str, metadata: dict[str, str]) -> str:
         if part.lower().startswith("sheet:"):
             return part.split(":", 1)[1].strip()
     return ""
+
+
+def build_chunk_id(chunk: Chunk) -> str:
+    """为 chunk 生成稳定 ID，用于多路召回、BM25 和向量检索结果去重。"""
+
+    raw = f"{chunk.source}\n{chunk.index}\n{chunk.section_title}\n{chunk.text}"
+    return sha1(raw.encode("utf-8")).hexdigest()
 
 
 def infer_section_title(document_text: str, chunk_text: str) -> str:

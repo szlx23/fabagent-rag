@@ -278,7 +278,8 @@ Collection schema：
 重建策略：
 
 - 本项目不再兼容旧 collection schema
-- 修改 metadata schema 后，执行 `scripts/reset_milvus.py` 再重新入库
+- 修改 metadata schema 或关键词索引结构后，执行 `scripts/reset_milvus.py` 再重新入库
+- `scripts/reset_milvus.py` 会同时删除 Milvus collection 和 SQLite BM25 索引文件
 
 ### 6. Query 处理策略
 
@@ -339,7 +340,6 @@ Query Plan 策略：
 
 - 多轮对话历史压缩
 - HyDE
-- 关键词检索和向量检索混合召回
 - metadata filter
 - 按文件、章节、页码过滤
 
@@ -347,14 +347,31 @@ Query Plan 策略：
 
 当前搜索策略：
 
-- 使用 Milvus vector search
-- 搜索字段：`embedding`
+- 使用 Milvus vector search + SQLite FTS5 BM25 混合检索
+- 向量搜索字段：`embedding`
+- 关键词索引字段：正文、章节标题、sheet 名、来源文件名和内容类型
 - 返回字段：`source`、`page`、`section_title`、`text`
 - `top_k` 由 CLI 或前端控制，默认前端为 3，API 默认值为 4
 - 每个 Query Plan 中的 query 都会独立检索
-- 多路检索结果按 `source + page + section_title + text` 去重
-- 重复 chunk 保留最高 score
-- score 使用 Milvus 返回的 distance/score
+- 每个 query 同时执行向量检索和 BM25 检索
+- 多路检索结果优先按 `chunk_id` 去重
+- 重复 chunk 会合并 `vector_score` 和 `keyword_score`
+- 最终 `score` 是按 intent 加权后的融合分数
+
+意图权重：
+
+| intent | vector weight | keyword weight | 目标 |
+| --- | ---: | ---: | --- |
+| `lookup` | `0.65` | `0.35` | 兼顾语义召回和精确术语/编号命中 |
+| `summarize` | `0.80` | `0.20` | 更偏主题覆盖，避免被少数关键词绑死 |
+
+BM25 策略：
+
+- 使用 SQLite FTS5 的 `bm25()` 排序，不额外引入 pip 依赖
+- 英文、数字、编号类 token 直接进入关键词索引
+- 中文文本额外写入 bigram/trigram，弥补 SQLite 默认 tokenizer 对中文分词较弱的问题
+- `content_type=table` 且 query 包含编号、数字、下划线或短横线时，会获得轻量 metadata boost
+- query 命中 `section_title` 或 `sheet_name` 时，也会获得轻量 boost
 
 当前尚未实现：
 
@@ -362,7 +379,6 @@ Query Plan 策略：
 - score threshold
 - MMR 去冗余
 - 同文件/同章节结果合并
-- 表格 chunk 特殊排序
 - 长上下文压缩
 
 ### 8. 回答生成策略
@@ -430,6 +446,11 @@ source / 第 x 页 / section_title
 | `INFERENCE_API_KEY` | 空 | 推理模型 API Key；未配置时会读取 `ARK_API_KEY` |
 | `INFERENCE_BASE_URL` | 空 | 推理模型 OpenAI 兼容接口地址 |
 | `INFERENCE_MODEL` | 空 | 推理模型名称 |
+| `KEYWORD_INDEX_PATH` | `data/indexes/bm25.sqlite3` | SQLite FTS5 BM25 关键词索引路径 |
+| `LOOKUP_VECTOR_WEIGHT` | `0.65` | `lookup` 意图下向量检索融合权重 |
+| `LOOKUP_KEYWORD_WEIGHT` | `0.35` | `lookup` 意图下 BM25 关键词检索融合权重 |
+| `SUMMARIZE_VECTOR_WEIGHT` | `0.80` | `summarize` 意图下向量检索融合权重 |
+| `SUMMARIZE_KEYWORD_WEIGHT` | `0.20` | `summarize` 意图下 BM25 关键词检索融合权重 |
 
 ## 项目结构
 

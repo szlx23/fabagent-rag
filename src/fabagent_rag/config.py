@@ -36,6 +36,11 @@ class Settings:
     inference_api_key: str
     inference_base_url: str
     inference_model: str
+    keyword_index_path: str
+    lookup_vector_weight: float
+    lookup_keyword_weight: float
+    summarize_vector_weight: float
+    summarize_keyword_weight: float
 
 
 def load_settings() -> Settings:
@@ -79,4 +84,9 @@ def load_settings() -> Settings:
         inference_api_key=os.getenv("ARK_API_KEY", ""),
         inference_base_url=os.getenv("ARK_CODING_PLAN_BASE_URL", ""),
         inference_model=os.getenv("INFERENCE_MODEL", ""),
+        keyword_index_path=os.getenv("KEYWORD_INDEX_PATH", "data/indexes/bm25.sqlite3"),
+        lookup_vector_weight=float(os.getenv("LOOKUP_VECTOR_WEIGHT", "0.65")),
+        lookup_keyword_weight=float(os.getenv("LOOKUP_KEYWORD_WEIGHT", "0.35")),
+        summarize_vector_weight=float(os.getenv("SUMMARIZE_VECTOR_WEIGHT", "0.80")),
+        summarize_keyword_weight=float(os.getenv("SUMMARIZE_KEYWORD_WEIGHT", "0.20")),
     )

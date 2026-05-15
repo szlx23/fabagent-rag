@@ -2,6 +2,7 @@ export type IngestResponse = {
   documents: number;
   chunks: number;
   inserted: number;
+  keyword_indexed?: number;
   sources: string[];
 };
 
@@ -35,6 +36,9 @@ export type AskResponse = {
     source?: string;
     text?: string;
     score?: number;
+    vector_score?: number;
+    keyword_score?: number;
+    retrieval_mode?: string;
     page?: number | null;
     section_title?: string;
     [key: string]: unknown;

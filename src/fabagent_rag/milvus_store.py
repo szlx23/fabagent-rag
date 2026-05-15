@@ -1,11 +1,9 @@
-from hashlib import sha1
-
 from pymilvus import (
     DataType,
     MilvusClient,
 )
 
-from fabagent_rag.chunking import Chunk
+from fabagent_rag.chunking import Chunk, build_chunk_id
 
 
 class MilvusStore:
@@ -144,10 +142,3 @@ def normalize_page(value: object) -> int | None:
     if not isinstance(value, int) or value <= 0:
         return None
     return value
-
-
-def build_chunk_id(chunk: Chunk) -> str:
-    """为 chunk 生成稳定 ID，用于混合检索和多路召回去重。"""
-
-    raw = f"{chunk.source}\n{chunk.index}\n{chunk.section_title}\n{chunk.text}"
-    return sha1(raw.encode("utf-8")).hexdigest()

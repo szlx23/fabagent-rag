@@ -12,6 +12,7 @@ frontend/dist/
 data/milvus/
 data/mineru/
 data/uploads/
+data/indexes/
 data/raw/*
 !data/raw/.gitkeep
 data/semi-document/

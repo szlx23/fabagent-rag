@@ -33,6 +33,7 @@ class IngestResponse(BaseModel):
     documents: int
     chunks: int
     inserted: int
+    keyword_indexed: int = 0
     sources: list[str] = Field(default_factory=list)
 
 

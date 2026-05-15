@@ -13,7 +13,8 @@ from fabagent_rag.chunking import (
 from fabagent_rag.config import Settings
 from fabagent_rag.documents import ParsedDocument, parse_document
 from fabagent_rag.embeddings import EmbeddingModel
-from fabagent_rag.intent import detect_intent
+from fabagent_rag.intent import Intent, detect_intent
+from fabagent_rag.keyword_store import KeywordStore, extract_search_terms
 from fabagent_rag.llm import build_answer, build_chat_answer, classify_intent_with_llm
 from fabagent_rag.milvus_store import MilvusStore
 from fabagent_rag.query_planner import QueryPlan, build_query_plan
@@ -38,6 +39,12 @@ def build_store(settings: Settings, dimension: int) -> MilvusStore:
         settings.milvus_collection,
         dimension,
     )
+
+
+def build_keyword_store(settings: Settings) -> KeywordStore:
+    """根据配置创建关键词索引访问对象。"""
+
+    return KeywordStore(settings.keyword_index_path)
 
 
 DEFAULT_EMBEDDING_BATCH_SIZE = 10
@@ -145,16 +152,19 @@ def ingest_chunks(
 
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
+    keyword_store = build_keyword_store(settings)
 
     inserted = 0
     for chunk_batch in batch(chunks, batch_size):
         embeddings = embedder.encode([chunk.text for chunk in chunk_batch])
         inserted += store.insert(chunk_batch, embeddings)
+    keyword_indexed = keyword_store.insert(chunks)
 
     return {
         "documents": document_count,
         "chunks": len(chunks),
         "inserted": inserted,
+        "keyword_indexed": keyword_indexed,
     }
 
 
@@ -191,7 +201,7 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
         settings.inference_base_url,
         settings.inference_model,
     )
-    contexts = search_contexts(settings, query_plan, top_k)
+    contexts = search_contexts(settings, query_plan, top_k, intent)
     answer = build_answer(
         question,
         contexts,
@@ -212,29 +222,170 @@ def search_contexts(
     settings: Settings,
     query_plan: QueryPlan,
     top_k: int,
+    intent: Intent,
 ) -> list[dict[str, object]]:
-    """使用 Query Plan 中的多个 query 召回上下文，并合并去重。"""
+    """使用 Query Plan 中的多个 query 做向量+BM25混合检索。"""
 
     embedder = build_embedder(settings)
     store = build_store(settings, embedder.dimension)
+    keyword_store = build_keyword_store(settings)
+    weights = hybrid_weights(settings, intent)
     queries = query_plan.queries()
     embeddings = embedder.encode(queries)
 
-    candidates: dict[tuple[object, object, object, object], dict[str, object]] = {}
+    candidates: dict[tuple[object, object, object, object, object], dict[str, object]] = {}
     for query, embedding in zip(queries, embeddings, strict=True):
-        for context in store.search(embedding, top_k=top_k):
-            context_with_query = {**context, "matched_query": query}
-            key = (
-                context_with_query.get("source"),
-                context_with_query.get("page"),
-                context_with_query.get("section_title"),
-                context_with_query.get("text"),
+        for context in store.search(embedding, top_k=top_k * 2):
+            merge_candidate(
+                candidates,
+                {
+                    **context,
+                    "matched_query": query,
+                    "vector_score": normalize_vector_score(context.get("score")),
+                },
             )
-            existing = candidates.get(key)
-            if existing is None or score_of(context_with_query) > score_of(existing):
-                candidates[key] = context_with_query
+
+        for context in keyword_store.search(query, top_k=top_k * 2):
+            merge_candidate(
+                candidates,
+                {
+                    **context,
+                    "matched_query": query,
+                    "keyword_score": float(context.get("keyword_score") or 0.0),
+                },
+            )
+
+    for context in candidates.values():
+        context["metadata_boost"] = metadata_boost(context, queries)
+        context["score"] = fused_score(context, weights)
+        context["retrieval_mode"] = retrieval_mode(context)
 
     return sorted(candidates.values(), key=score_of, reverse=True)[:top_k]
+
+
+def hybrid_weights(settings: Settings, intent: Intent) -> tuple[float, float]:
+    """根据意图选择向量检索和 BM25 的融合权重。"""
+
+    if intent == "summarize":
+        return normalize_weights(
+            settings.summarize_vector_weight,
+            settings.summarize_keyword_weight,
+        )
+    return normalize_weights(settings.lookup_vector_weight, settings.lookup_keyword_weight)
+
+
+def normalize_weights(vector_weight: float, keyword_weight: float) -> tuple[float, float]:
+    total = vector_weight + keyword_weight
+    if total <= 0:
+        return 1.0, 0.0
+    return vector_weight / total, keyword_weight / total
+
+
+def merge_candidate(
+    candidates: dict[tuple[object, object, object, object, object], dict[str, object]],
+    context: dict[str, object],
+) -> None:
+    """合并向量检索和关键词检索返回的同一个 chunk。"""
+
+    key = candidate_key(context)
+    existing = candidates.get(key)
+    if existing is None:
+        candidates[key] = {
+            **context,
+            "vector_score": float(context.get("vector_score") or 0.0),
+            "keyword_score": float(context.get("keyword_score") or 0.0),
+            "matched_queries": [context.get("matched_query")],
+        }
+        return
+
+    existing["vector_score"] = max(
+        float(existing.get("vector_score") or 0.0),
+        float(context.get("vector_score") or 0.0),
+    )
+    existing["keyword_score"] = max(
+        float(existing.get("keyword_score") or 0.0),
+        float(context.get("keyword_score") or 0.0),
+    )
+    if context.get("bm25_score") is not None:
+        existing["bm25_score"] = context["bm25_score"]
+    matched_queries = existing.setdefault("matched_queries", [])
+    if isinstance(matched_queries, list) and context.get("matched_query") not in matched_queries:
+        matched_queries.append(context.get("matched_query"))
+
+
+def candidate_key(context: dict[str, object]) -> tuple[object, object, object, object, object]:
+    """优先用 chunk_id 去重；没有 chunk_id 时退回来源位置和文本。"""
+
+    chunk_id = context.get("chunk_id")
+    if chunk_id:
+        return (chunk_id, None, None, None, None)
+    return (
+        context.get("source"),
+        context.get("page"),
+        context.get("section_title"),
+        context.get("text"),
+        None,
+    )
+
+
+def normalize_vector_score(score: object) -> float:
+    """把向量 IP 分数收敛到 0-1，便于和 BM25 rank 分数融合。"""
+
+    if not isinstance(score, int | float):
+        return 0.0
+    return max(0.0, min(1.0, float(score)))
+
+
+def fused_score(context: dict[str, object], weights: tuple[float, float]) -> float:
+    vector_weight, keyword_weight = weights
+    return (
+        vector_weight * float(context.get("vector_score") or 0.0)
+        + keyword_weight * float(context.get("keyword_score") or 0.0)
+        + float(context.get("metadata_boost") or 0.0)
+    )
+
+
+def metadata_boost(context: dict[str, object], queries: list[str]) -> float:
+    """用轻量 metadata 加权处理表格、标题和 sheet 命中。"""
+
+    query_text = " ".join(queries)
+    query_terms = set(extract_search_terms(query_text))
+    if not query_terms:
+        return 0.0
+
+    boost = 0.0
+    if context.get("content_type") == "table" and has_structured_term(query_terms):
+        boost += 0.05
+
+    location_terms = set(
+        extract_search_terms(
+            " ".join(
+                [
+                    str(context.get("section_title") or ""),
+                    str(context.get("sheet_name") or ""),
+                ]
+            )
+        )
+    )
+    if query_terms & location_terms:
+        boost += 0.03
+    return boost
+
+
+def has_structured_term(terms: set[str]) -> bool:
+    """判断 query 是否含有更适合关键词检索的编号、参数或代码。"""
+
+    return any(any(char.isdigit() for char in term) or "-" in term or "_" in term for term in terms)
+
+
+def retrieval_mode(context: dict[str, object]) -> str:
+    has_vector = float(context.get("vector_score") or 0.0) > 0
+    has_keyword = float(context.get("keyword_score") or 0.0) > 0
+    if has_vector and has_keyword:
+        return "hybrid"
+    if has_keyword:
+        return "keyword"
+    return "vector"
 
 
 def score_of(context: dict[str, object]) -> float:
