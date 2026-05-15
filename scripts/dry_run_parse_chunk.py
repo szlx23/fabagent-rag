@@ -56,6 +56,18 @@ def main() -> None:
     estimates = []
     for index, path in enumerate(files, start=1):
         print(f"[{index}/{len(files)}] {path}", flush=True)
+        if args.resume_existing:
+            existing = load_existing_estimate(
+                path, parsed_dir, chunks_dir, args.embedding_batch_size
+            )
+            if existing is not None:
+                estimates.append(existing)
+                print(
+                    f"  skip: chunks={existing.chunk_count}, "
+                    f"chars={existing.parsed_chars}, calls={existing.embedding_batch_calls}",
+                    flush=True,
+                )
+                continue
         estimate = process_file(
             path=path,
             parsed_dir=parsed_dir,
@@ -91,6 +103,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_EMBEDDING_BATCH_SIZE,
         help="估算 embedding 入库调用次数时使用的批大小。",
+    )
+    parser.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help="如果输出目录里已经有对应的 parsed/chunks 结果，则直接读取并跳过重跑。",
     )
     return parser.parse_args()
 
@@ -171,6 +188,60 @@ def write_outputs(
         writer.writerows(rows)
 
     (output_dir / "README.md").write_text(build_report(summary, estimates), encoding="utf-8")
+
+
+def load_existing_estimate(
+    path: Path,
+    parsed_dir: Path,
+    chunks_dir: Path,
+    embedding_batch_size: int,
+) -> FileEstimate | None:
+    safe_name = safe_file_stem(path)
+    chunk_path = chunks_dir / f"{safe_name}.jsonl"
+    error_path = chunks_dir / f"{safe_name}.error.txt"
+    if error_path.exists():
+        error_text = error_path.read_text(encoding="utf-8")
+        return FileEstimate(
+            source=str(path),
+            file_name=path.name,
+            file_ext=path.suffix.lower(),
+            file_size_bytes=path.stat().st_size,
+            excluded_by_prefix=is_excluded(path),
+            status="error",
+            error=error_text.splitlines()[-1] if error_text else "previous error",
+        )
+    if not chunk_path.exists():
+        return None
+
+    chunk_lengths = []
+    parser = ""
+    with chunk_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not parser:
+                parser = row.get("parser", "")
+            chunk_lengths.append(len(row.get("text", "")))
+
+    parsed_path = parsed_dir / f"{safe_name}.md"
+    parsed_text = parsed_path.read_text(encoding="utf-8") if parsed_path.exists() else ""
+    parsed_chars = len(parsed_text) if parsed_text else sum(chunk_lengths)
+    return FileEstimate(
+        source=str(path),
+        file_name=path.name,
+        file_ext=path.suffix.lower(),
+        file_size_bytes=path.stat().st_size,
+        excluded_by_prefix=is_excluded(path),
+        status="ok",
+        parser=parser,
+        parsed_chars=parsed_chars,
+        estimated_tokens=estimate_tokens(parsed_text) if parsed_text else estimate_tokens(" " * parsed_chars),
+        chunk_count=len(chunk_lengths),
+        avg_chunk_chars=int(sum(chunk_lengths) / len(chunk_lengths)) if chunk_lengths else 0,
+        max_chunk_chars=max(chunk_lengths) if chunk_lengths else 0,
+        embedding_batch_calls=math.ceil(len(chunk_lengths) / embedding_batch_size),
+    )
 
 
 def build_summary(estimates: list[FileEstimate], embedding_batch_size: int) -> dict[str, int]:

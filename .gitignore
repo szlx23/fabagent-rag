@@ -14,6 +14,7 @@ data/mineru/
 data/uploads/
 data/indexes/
 data/eval/parse_chunk_dry_run*/
+data/eval/parse_chunk_full_local/
 data/raw/*
 !data/raw/.gitkeep
 data/semi-document/
