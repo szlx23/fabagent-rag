@@ -571,6 +571,9 @@ textarea {
 }
 
 .scopeNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 10px;
   border: 1px solid #cfe1df;
   border-radius: 8px;
@@ -579,13 +582,41 @@ textarea {
   background: var(--brand-soft);
 }
 
-.scopeNotice span {
-  display: block;
+.scopeNotice strong {
+  flex: 0 0 auto;
+  color: #0b4f49;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.scopeChipList {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
   overflow: hidden;
+}
+
+.scopeChip,
+.scopeAll {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #aacdca;
+  border-radius: 999px;
+  padding: 4px 8px;
   font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: rgb(255 255 255 / 66%);
+}
+
+.scopeChip {
+  max-width: 180px;
+}
+
+.scopeChip.muted {
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .promptStrip {

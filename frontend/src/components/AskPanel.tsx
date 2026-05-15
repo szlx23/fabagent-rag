@@ -36,6 +36,16 @@ function getFileName(source: string, fileName?: string) {
   return source.split(/[\\/]/).filter(Boolean).pop() || source;
 }
 
+function compactFileName(fileName: string) {
+  if (fileName.length <= 28) {
+    return fileName;
+  }
+  const dotIndex = fileName.lastIndexOf(".");
+  const extension = dotIndex > 0 ? fileName.slice(dotIndex) : "";
+  const base = extension ? fileName.slice(0, dotIndex) : fileName;
+  return `${base.slice(0, 14)}...${base.slice(-7)}${extension}`;
+}
+
 function matchesDocument(document: IngestedDocument, query: string) {
   if (!query) {
     return true;
@@ -158,11 +168,11 @@ export function AskPanel({ refreshKey = "", onDocumentsChanged }: AskPanelProps)
         .map((document) => getFileName(document.source, document.file_name)),
     [documents, selectedSources],
   );
+  const visibleScopeNames = selectedDocumentNames.slice(0, 3);
+  const hiddenScopeCount = Math.max(0, selectedDocumentNames.length - visibleScopeNames.length);
   const scopeLabel =
     selectedDocumentNames.length > 0
-      ? `将基于 ${selectedDocumentNames.slice(0, 3).join("、")}${
-          selectedDocumentNames.length > 3 ? ` 等 ${selectedDocumentNames.length} 个文件` : ""
-        } 回复`
+      ? `将基于 ${selectedDocumentNames.join("、")} 回复`
       : "将基于全部已入库文件回复";
   const selectedContext = result?.contexts[selectedContextIndex];
 
@@ -262,7 +272,19 @@ export function AskPanel({ refreshKey = "", onDocumentsChanged }: AskPanelProps)
         />
 
         <div className="scopeNotice" title={scopeLabel}>
-          <span>{scopeLabel}</span>
+          <strong>基于</strong>
+          {visibleScopeNames.length > 0 ? (
+            <div className="scopeChipList">
+              {visibleScopeNames.map((fileName) => (
+                <span className="scopeChip" key={fileName} title={fileName}>
+                  {compactFileName(fileName)}
+                </span>
+              ))}
+              {hiddenScopeCount > 0 && <span className="scopeChip muted">+{hiddenScopeCount}</span>}
+            </div>
+          ) : (
+            <span className="scopeAll">全部文件</span>
+          )}
         </div>
 
         <div className="promptStrip">
