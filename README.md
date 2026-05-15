@@ -105,23 +105,43 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 ```text
 文件上传 / data/raw / 单文件
-    -> 文件类型识别
-    -> Parser
-    -> 统一文本 / Markdown
-    -> Chunk
-    -> Embedding
-    -> Milvus + BM25
-
+  ↓
+文件类型识别
+  ↓
+Parser
+  ↓
+统一文本 / Markdown
+  ↓
+Chunk
+  ↓
+Embedding
+  ↓
+Milvus + BM25
+  ↑
+混合检索
+  ↑
+意图识别 + Query Plan
+  ↑
 用户问题
-    -> 意图识别 + Query Plan
-    -> 混合检索
-    -> 上下文合并
-    -> LLM 生成回答
+  ↓
+上下文合并
+  ↓
+LLM 生成回答
 ```
 
 ### 1. 文件解析策略
 
 目标是把不同格式统一转换为 Markdown/text 中间格式，后续 chunk、embedding、存储和检索都只处理这一种统一文本。
+
+```text
+文件上传 / data/raw / 单文件
+  ↓
+文件类型识别
+  ↓
+Parser
+  ↓
+统一文本 / Markdown
+```
 
 当前实现：
 
@@ -163,6 +183,20 @@ MinerU 策略：
 ### 2. Chunk 策略
 
 目标是尽量让每个 chunk 有完整语义，同时不超过 embedding 模型适合处理的长度。
+
+```text
+统一文本 / Markdown
+  ↓
+语义块拆分
+  ↓
+同章节聚合
+  ↓
+长块兜底切分
+  ↓
+小块合并
+  ↓
+Chunk
+```
 
 当前自动 chunk 采用结构优先策略：
 
@@ -322,25 +356,26 @@ Collection schema：
 规则只作为兜底，不作为主判断器。这里故意默认走 `lookup`，因为 LLM 不可用时，
 误走知识库检索比误把资料问题当成闲聊更符合当前项目目标。
 
-示意图：
-
 ```text
 用户问题
-    -> LLM 意图识别
-        -> 成功
-            -> 最终意图
-        -> 失败 / 无配置 / 解析失败
-            -> 规则兜底识别
-            -> 最终意图
-
+  ↓
+LLM 意图识别
+  ↓
+规则兜底
+  ↓
 最终意图
-    -> chat
-        -> 直接闲聊回答
-    -> lookup / summarize
-        -> Query Plan
-        -> 多 query 检索
-        -> 合并去重
-        -> 基于上下文回答
+  ├─ chat
+  │   ↓
+  │ 直接闲聊回答
+  └─ lookup / summarize
+      ↓
+    Query Plan
+      ↓
+    多 query 检索
+      ↓
+    合并去重
+      ↓
+    基于上下文回答
 ```
 
 LLM 意图识别策略：
@@ -359,6 +394,22 @@ Query Plan 策略：
 - `lookup` 最多扩写 3 条
 - `summarize` 通常不扩写，最多扩写 1 条
 - Query Plan 生成失败时，只使用原问题检索
+
+```text
+用户问题
+  ↓
+LLM 意图识别
+  ↓
+规则兜底
+  ↓
+最终意图
+  ├─ chat → 直接闲聊回答
+  └─ lookup / summarize
+      ↓
+    Query Plan
+      ↓
+    原问题 / 重写 query / 扩写 query
+```
 
 当前尚未实现：
 
@@ -381,6 +432,20 @@ Query Plan 策略：
 - 多路检索结果优先按 `chunk_id` 去重
 - 重复 chunk 会合并 `vector_score` 和 `keyword_score`
 - 最终 `score` 是按 intent 加权后的融合分数
+
+```text
+Query Plan
+  ↓
+原问题 / 重写 query / 扩写 query
+  ↓
+向量检索 + BM25
+  ↓
+chunk_id 去重
+  ↓
+分数融合
+  ↓
+Top-k contexts
+```
 
 意图权重：
 
@@ -421,6 +486,16 @@ BM25 策略：
 - 系统不会中断问答流程
 - 会直接返回检索到的上下文
 - 这样可以独立排查“检索是否正常”和“生成是否正常”
+
+```text
+Top-k contexts
+  ↓
+Prompt 组装
+  ↓
+LLM
+  ↓
+回答
+```
 
 当前尚未实现：
 
