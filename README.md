@@ -104,29 +104,29 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 总体流程：
 
 ```text
-文件上传 / data/raw / 单文件
-  ↓
-文件类型识别
-  ↓
-Parser
-  ↓
-统一文本 / Markdown
-  ↓
-Chunk
-  ↓
-Embedding
-  ↓
-Milvus + BM25
-  ↑
-混合检索
-  ↑
-意图识别 + Query Plan
-  ↑
-用户问题
-  ↓
-上下文合并
-  ↓
-LLM 生成回答
+入库链路
+┌─ 文件上传 / data/raw / 单文件
+│   ↓
+│  文件类型识别
+│   ↓
+│  Parser
+│   ↓
+│  统一文本 / Markdown
+│   ↓
+│  Chunk
+│   ↓
+│  Embedding
+└─ Milvus + BM25
+
+查询链路
+┌─ 用户问题
+│   ↓
+│  意图识别 + Query Plan
+│   ↓
+│  混合检索
+│   ↓
+│  上下文合并
+└─ LLM 生成回答
 ```
 
 ### 1. 文件解析策略
@@ -549,13 +549,37 @@ source / 第 x 页 / section_title
 .
 ├── docker-compose.yml
 ├── frontend
+│   ├── index.html
+│   ├── package.json
 │   └── src
+│       ├── App.tsx
+│       ├── api/rag.ts
+│       ├── components
+│       │   ├── AskPanel.tsx
+│       │   └── FileUploadPanel.tsx
+│       ├── main.tsx
+│       ├── styles.css
+│       └── types/rag.ts
 ├── scripts
 │   ├── dev.sh
+│   ├── dry_run_parse_chunk.py
 │   ├── eval.sh
 │   └── ingest_all.sh
 ├── src
 │   └── fabagent_rag
+│       ├── api.py
+│       ├── chunking.py
+│       ├── cli.py
+│       ├── config.py
+│       ├── documents.py
+│       ├── embeddings.py
+│       ├── evaluation.py
+│       ├── intent.py
+│       ├── keyword_store.py
+│       ├── llm.py
+│       ├── milvus_store.py
+│       ├── query_planner.py
+│       └── rag_service.py
 └── data
     └── raw
 ```
