@@ -11,7 +11,7 @@ from fabagent_rag.chunking import (
     split_text,
 )
 from fabagent_rag.config import Settings
-from fabagent_rag.documents import ParsedDocument, parse_document
+from fabagent_rag.documents import ParsedDocument, discover_supported_documents, parse_document
 from fabagent_rag.embeddings import EmbeddingModel
 from fabagent_rag.intent import Intent, detect_intent
 from fabagent_rag.keyword_store import KeywordStore, extract_search_terms
@@ -75,6 +75,53 @@ def ingest_path(settings: Settings, path: Path, batch_size: int) -> dict[str, in
     )
 
 
+def ingest_directory(
+    settings: Settings,
+    directory: Path,
+    batch_size: int,
+    chunk_config: ChunkConfig | None = None,
+    include_excluded: bool = True,
+    reset: bool = True,
+) -> dict[str, object]:
+    """批量入库目录下所有支持的文件。
+
+    默认包含 `exclude__` / `excelude__` 前缀文件，适合真正重建全量知识库。
+    如果需要做日常回归，可以把 `include_excluded=False` 收缩到主测试集。
+    """
+
+    files = discover_supported_documents(directory, include_excluded=include_excluded)
+    parsed_documents = []
+    errors: list[dict[str, str]] = []
+    for path in files:
+        try:
+            parsed_documents.append(
+                parse_document(path, str(path), mineru_backend=settings.mineru_backend)
+            )
+        except Exception as exc:  # noqa: BLE001 - 批量入库不能因为单文件失败直接停掉
+            errors.append({"source": str(path), "error": str(exc)})
+
+    if reset:
+        reset_indexes(settings)
+
+    if parsed_documents:
+        result = ingest_documents(
+            settings,
+            parsed_documents,
+            batch_size=batch_size,
+            chunk_config=chunk_config,
+        )
+    else:
+        result = {"documents": 0, "chunks": 0, "inserted": 0, "keyword_indexed": 0}
+
+    return {
+        **result,
+        "scanned_files": len(files),
+        "parsed_files": len(parsed_documents),
+        "failed_files": len(errors),
+        "errors": errors,
+    }
+
+
 def ingest_documents(
     settings: Settings,
     documents: list[ParsedDocument | tuple[str, str]],
@@ -105,6 +152,17 @@ def ingest_documents(
         batch_size=batch_size,
         document_count=len(parsed_documents),
     )
+
+
+def reset_indexes(settings: Settings) -> dict[str, bool]:
+    """清空当前向量库和关键词索引，便于全量重建。"""
+
+    store = MilvusStore(settings.milvus_host, settings.milvus_port, settings.milvus_collection, 1)
+    keyword_store = KeywordStore(settings.keyword_index_path)
+    return {
+        "milvus": store.drop_collection(),
+        "keyword": keyword_store.drop_index(),
+    }
 
 
 def ingest_manual_chunks(

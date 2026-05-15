@@ -11,7 +11,7 @@ if __package__ in {None, ""}:
 from fabagent_rag.config import load_settings
 from fabagent_rag.evaluation import DEFAULT_EVAL_SET, run_evaluation
 from fabagent_rag.milvus_store import MilvusSchemaError
-from fabagent_rag.rag_service import answer_question, ingest_path
+from fabagent_rag.rag_service import answer_question, ingest_directory, ingest_path
 
 
 @click.group()
@@ -33,6 +33,54 @@ def ingest(path: Path, batch_size: int) -> None:
     except MilvusSchemaError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"已从 {result['documents']} 个文档写入 {result['inserted']} 个分块。")
+
+
+@main.command(name="ingest-all")
+@click.argument(
+    "directory",
+    required=False,
+    default=Path("data/raw"),
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@click.option("--batch-size", default=10, show_default=True, help="向量化和写入的批大小。")
+@click.option(
+    "--keep-old",
+    is_flag=True,
+    help="默认会先删除旧 collection 和 BM25 索引；加此参数后保留旧数据并追加写入。",
+)
+@click.option(
+    "--exclude-prefixed",
+    is_flag=True,
+    help="跳过 `exclude__` / `excelude__` 前缀文件；默认会把它们一起入库。",
+)
+def ingest_all(
+    directory: Path,
+    batch_size: int,
+    keep_old: bool,
+    exclude_prefixed: bool,
+) -> None:
+    """将目录下所有支持的文档批量入库。"""
+
+    settings = load_settings()
+    try:
+        result = ingest_directory(
+            settings,
+            directory,
+            batch_size=batch_size,
+            include_excluded=not exclude_prefixed,
+            reset=not keep_old,
+        )
+    except MilvusSchemaError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(
+        f"已扫描 {result['scanned_files']} 个文件，解析 {result['parsed_files']} 个，"
+        f"失败 {result['failed_files']} 个，写入 {result['inserted']} 个分块。"
+    )
+    if result["errors"]:
+        click.echo("失败文件：")
+        for item in result["errors"]:
+            click.echo(f"- {item['source']}: {item['error']}")
 
 
 @main.command()
