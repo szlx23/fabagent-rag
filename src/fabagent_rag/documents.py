@@ -206,21 +206,14 @@ def parse_document(path: Path, source: str, mineru_backend: str = "pipeline") ->
 
 def discover_supported_documents(
     directory: Path,
-    include_excluded: bool = True,
 ) -> list[Path]:
-    """扫描目录中可解析的文件。
-
-    这里默认把 `data/raw` 下所有支持的文件都纳入，包含 `exclude__` / `excelude__`
-    前缀文件；如果后续只想做日常回归，可以通过 `include_excluded=False` 收缩范围。
-    """
+    """扫描目录中可解析的文件。"""
 
     files = []
     for path in sorted(directory.iterdir(), key=lambda item: item.name):
         if not path.is_file() or path.name == ".gitkeep":
             continue
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
-        if not include_excluded and path.name.startswith(("exclude__", "excelude__")):
             continue
         files.append(path)
     return files

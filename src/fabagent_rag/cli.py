@@ -66,16 +66,10 @@ def ingest(path: Path, batch_size: int) -> None:
     is_flag=True,
     help="默认会先删除旧 collection 和 BM25 索引；加此参数后保留旧数据并追加写入。",
 )
-@click.option(
-    "--exclude-prefixed",
-    is_flag=True,
-    help="跳过 `exclude__` / `excelude__` 前缀文件；默认会把它们一起入库。",
-)
 def ingest_all(
     directory: Path,
     batch_size: int,
     keep_old: bool,
-    exclude_prefixed: bool,
 ) -> None:
     """将目录下所有支持的文档批量入库。"""
 
@@ -85,7 +79,6 @@ def ingest_all(
             settings,
             directory,
             batch_size=batch_size,
-            include_excluded=not exclude_prefixed,
             reset=not keep_old,
             progress_callback=render_progress,
         )

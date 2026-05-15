@@ -82,17 +82,13 @@ def ingest_directory(
     directory: Path,
     batch_size: int,
     chunk_config: ChunkConfig | None = None,
-    include_excluded: bool = True,
     reset: bool = True,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, object]:
     """批量入库目录下所有支持的文件。
-
-    默认包含 `exclude__` / `excelude__` 前缀文件，适合真正重建全量知识库。
-    如果需要做日常回归，可以把 `include_excluded=False` 收缩到主测试集。
     """
 
-    files = discover_supported_documents(directory, include_excluded=include_excluded)
+    files = discover_supported_documents(directory)
     errors: list[dict[str, str]] = []
     parsed_files = 0
     inserted = 0

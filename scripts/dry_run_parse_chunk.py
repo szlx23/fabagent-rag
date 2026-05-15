@@ -30,7 +30,6 @@ class FileEstimate:
     file_name: str
     file_ext: str
     file_size_bytes: int
-    excluded_by_prefix: bool
     status: str
     parser: str = ""
     parsed_chars: int = 0
@@ -52,7 +51,7 @@ def main() -> None:
     parsed_dir.mkdir(parents=True, exist_ok=True)
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    files = discover_files(input_dir, include_excluded=args.include_excluded)
+    files = discover_files(input_dir)
     estimates = []
     for index, path in enumerate(files, start=1):
         print(f"[{index}/{len(files)}] {path}", flush=True)
@@ -94,11 +93,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-dir", default="data/raw", help="待扫描文档目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="结果输出目录。")
     parser.add_argument(
-        "--include-excluded",
-        action="store_true",
-        help="默认跳过 excelude__/exclude__ 前缀文件；加此参数会纳入统计。",
-    )
-    parser.add_argument(
         "--embedding-batch-size",
         type=int,
         default=DEFAULT_EMBEDDING_BATCH_SIZE,
@@ -112,14 +106,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def discover_files(input_dir: Path, include_excluded: bool) -> list[Path]:
+def discover_files(input_dir: Path) -> list[Path]:
     files = []
     for path in sorted(input_dir.iterdir(), key=lambda item: item.name):
         if not path.is_file() or path.name == ".gitkeep":
             continue
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
-        if not include_excluded and is_excluded(path):
             continue
         files.append(path)
     return files
@@ -358,10 +350,6 @@ def format_pct(part: int, whole: int) -> str:
     if whole <= 0:
         return "0.00%"
     return f"{part / whole:.2%}"
-
-
-def is_excluded(path: Path) -> bool:
-    return path.name.startswith(("excelude__", "exclude__"))
 
 
 if __name__ == "__main__":
