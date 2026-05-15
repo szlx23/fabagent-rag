@@ -235,20 +235,27 @@ def convert_legacy_office(path: Path, target_extension: str) -> Path:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         output_dir = Path(temp_dir)
-        subprocess.run(
-            [
-                office,
-                "--headless",
-                "--convert-to",
-                target_extension.lstrip("."),
-                "--outdir",
-                str(output_dir),
-                str(path),
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            subprocess.run(
+                [
+                    office,
+                    "--headless",
+                    "--convert-to",
+                    target_extension.lstrip("."),
+                    "--outdir",
+                    str(output_dir),
+                    str(path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()
+            message = f"LibreOffice 转换 {path} 失败。"
+            if stderr:
+                message = f"{message}\n{stderr[-800:]}"
+            raise RuntimeError(message) from exc
 
         converted_files = sorted(output_dir.glob(f"*{target_extension}"))
         if not converted_files:
@@ -283,25 +290,34 @@ def parse_with_mineru(path: Path, backend: str) -> str:
         output_dir = Path(temp_dir)
         env = os.environ.copy()
         env.setdefault("MINERU_MODEL_SOURCE", "modelscope")
-        subprocess.run(
-            [
-                mineru,
-                "-p",
-                str(path),
-                "-o",
-                str(output_dir),
-                "-b",
-                backend,
-                # 公式解析通常会明显增加耗时。当前 RAG 目标是术语/文档问答，
-                # 先关闭公式，表格保留为 Markdown，有利于检索。
-                "--formula",
-                "false",
-                "--table",
-                "true",
-            ],
-            check=True,
-            env=env,
-        )
+        try:
+            subprocess.run(
+                [
+                    mineru,
+                    "-p",
+                    str(path),
+                    "-o",
+                    str(output_dir),
+                    "-b",
+                    backend,
+                    # 公式解析通常会明显增加耗时。当前 RAG 目标是术语/文档问答，
+                    # 先关闭公式，表格保留为 Markdown，有利于检索。
+                    "--formula",
+                    "false",
+                    "--table",
+                    "true",
+                ],
+                check=True,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()
+            message = f"MinerU 解析 {path} 失败。"
+            if stderr:
+                message = f"{message}\n{stderr[-800:]}"
+            raise RuntimeError(message) from exc
 
         markdown_files = sorted(output_dir.rglob("*.md"))
         if not markdown_files:

@@ -14,6 +14,24 @@ from fabagent_rag.milvus_store import MilvusSchemaError
 from fabagent_rag.rag_service import answer_question, ingest_directory, ingest_path
 
 
+PROGRESS_BAR_WIDTH = 24
+
+
+def render_progress(stage: str, path: Path, current: int, total: int, detail: str = "") -> None:
+    """把全量入库的状态压成一条可刷新的终端进度线。"""
+
+    filled = 0 if total <= 0 else int(PROGRESS_BAR_WIDTH * current / total)
+    filled = max(0, min(PROGRESS_BAR_WIDTH, filled))
+    bar = "#" * filled + "-" * (PROGRESS_BAR_WIDTH - filled)
+    name = path.name
+    if len(name) > 34:
+        name = f"{name[:15]}...{name[-14:]}"
+    suffix = f" {detail}" if detail else ""
+    line = f"全量入库 [{bar}] {current}/{total} {stage}: {name}{suffix}"
+    sys.stdout.write("\r" + line[:140].ljust(140))
+    sys.stdout.flush()
+
+
 @click.group()
 def main() -> None:
     """基于 Milvus 的 RAG 命令行工具。"""
@@ -69,10 +87,15 @@ def ingest_all(
             batch_size=batch_size,
             include_excluded=not exclude_prefixed,
             reset=not keep_old,
+            progress_callback=render_progress,
         )
     except MilvusSchemaError as exc:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
         raise click.ClickException(str(exc)) from exc
 
+    sys.stdout.write("\n")
+    sys.stdout.flush()
     click.echo(
         f"已扫描 {result['scanned_files']} 个文件，解析 {result['parsed_files']} 个，"
         f"失败 {result['failed_files']} 个，写入 {result['inserted']} 个分块。"

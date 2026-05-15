@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import UTC, datetime
+from collections.abc import Callable
 
 from fabagent_rag.chunking import (
     Chunk,
@@ -48,6 +49,7 @@ def build_keyword_store(settings: Settings) -> KeywordStore:
 
 
 DEFAULT_EMBEDDING_BATCH_SIZE = 10
+ProgressCallback = Callable[[str, Path, int, int, str], None]
 
 
 def build_chunk_config(
@@ -82,6 +84,7 @@ def ingest_directory(
     chunk_config: ChunkConfig | None = None,
     include_excluded: bool = True,
     reset: bool = True,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, object]:
     """批量入库目录下所有支持的文件。
 
@@ -90,33 +93,93 @@ def ingest_directory(
     """
 
     files = discover_supported_documents(directory, include_excluded=include_excluded)
-    parsed_documents = []
     errors: list[dict[str, str]] = []
-    for path in files:
-        try:
-            parsed_documents.append(
-                parse_document(path, str(path), mineru_backend=settings.mineru_backend)
-            )
-        except Exception as exc:  # noqa: BLE001 - 批量入库不能因为单文件失败直接停掉
-            errors.append({"source": str(path), "error": str(exc)})
+    parsed_files = 0
+    inserted = 0
+    keyword_indexed = 0
+    chunk_total = 0
+    config = chunk_config or build_chunk_config(settings)
 
     if reset:
         reset_indexes(settings)
 
-    if parsed_documents:
-        result = ingest_documents(
-            settings,
-            parsed_documents,
-            batch_size=batch_size,
-            chunk_config=chunk_config,
+    if not files:
+        return {
+            "documents": 0,
+            "chunks": 0,
+            "inserted": 0,
+            "keyword_indexed": 0,
+            "scanned_files": 0,
+            "parsed_files": 0,
+            "failed_files": 0,
+            "errors": [],
+        }
+
+    embedder = build_embedder(settings)
+    store = build_store(settings, embedder.dimension)
+    keyword_store = build_keyword_store(settings)
+
+    for file_index, path in enumerate(files, start=1):
+        report_progress(progress_callback, "解析", path, file_index, len(files))
+        try:
+            parsed_document = parse_document(path, str(path), mineru_backend=settings.mineru_backend)
+        except Exception as exc:  # noqa: BLE001 - 批量入库不能因为单文件失败直接停掉
+            errors.append({"source": str(path), "error": str(exc)})
+            report_progress(progress_callback, "失败", path, file_index, len(files), "解析失败")
+            continue
+
+        parsed_files += 1
+        report_progress(progress_callback, "切块", path, file_index, len(files))
+        chunks = split_text(
+            parsed_document.text,
+            parsed_document.source,
+            config,
+            metadata=enrich_document_metadata(parsed_document),
         )
-    else:
-        result = {"documents": 0, "chunks": 0, "inserted": 0, "keyword_indexed": 0}
+        if not chunks:
+            report_progress(progress_callback, "跳过", path, file_index, len(files), "空内容")
+            continue
+
+        chunk_total += len(chunks)
+        batch_total = max(1, (len(chunks) + batch_size - 1) // batch_size)
+        for batch_index, chunk_batch in enumerate(batch(chunks, batch_size), start=1):
+            report_progress(
+                progress_callback,
+                "向量化",
+                path,
+                file_index,
+                len(files),
+                f"{batch_index}/{batch_total}",
+            )
+            embeddings = embedder.encode([chunk.text for chunk in chunk_batch])
+            report_progress(
+                progress_callback,
+                "入库",
+                path,
+                file_index,
+                len(files),
+                f"{batch_index}/{batch_total}",
+            )
+            inserted += store.insert(chunk_batch, embeddings)
+
+        report_progress(progress_callback, "索引", path, file_index, len(files))
+        keyword_indexed += keyword_store.insert(chunks)
+        report_progress(
+            progress_callback,
+            "完成",
+            path,
+            file_index,
+            len(files),
+            f"{len(chunks)} 个分块",
+        )
 
     return {
-        **result,
+        "documents": parsed_files,
+        "chunks": chunk_total,
+        "inserted": inserted,
+        "keyword_indexed": keyword_indexed,
         "scanned_files": len(files),
-        "parsed_files": len(parsed_documents),
+        "parsed_files": parsed_files,
         "failed_files": len(errors),
         "errors": errors,
     }
@@ -224,6 +287,20 @@ def ingest_chunks(
         "inserted": inserted,
         "keyword_indexed": keyword_indexed,
     }
+
+
+def report_progress(
+    callback: ProgressCallback | None,
+    stage: str,
+    path: Path,
+    current: int,
+    total: int,
+    detail: str = "",
+) -> None:
+    """把批量入库的状态交给 CLI 展示，核心流程本身不依赖具体输出格式。"""
+
+    if callback:
+        callback(stage, path, current, total, detail)
 
 
 def list_ingested_documents(settings: Settings) -> list[dict[str, object]]:
