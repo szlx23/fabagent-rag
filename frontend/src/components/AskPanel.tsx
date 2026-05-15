@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { askQuestion, listDocuments } from "../api/rag";
+import { askQuestion, deleteDocuments, listDocuments } from "../api/rag";
 import type { AskResponse, IngestedDocument } from "../types/rag";
 
 const DEFAULT_QUESTION = "OPC 在半导体工艺中有哪些类型？";
@@ -14,45 +14,18 @@ const QUICK_PROMPTS = [
 ];
 
 const INTENT_LABELS: Record<AskResponse["intent"], string> = {
-  lookup: "资料查询",
-  summarize: "资料总结",
-  chat: "闲聊",
+  lookup: "Lookup",
+  summarize: "Summary",
+  chat: "Chat",
 };
 
-function MarkdownBlock({ content }: { content: string }) {
-  return (
-    <div className="markdownBody answer">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-    </div>
-  );
-}
-
-function PlainTextBlock({ content }: { content: string }) {
-  return <pre className="plainContext">{content}</pre>;
-}
+type AskPanelProps = {
+  refreshKey?: string;
+  onDocumentsChanged?: () => void;
+};
 
 function normalizeText(text: unknown) {
   return String(text ?? "").replace(/\s+/g, " ").trim();
-}
-
-function getContextPreview(text: unknown) {
-  const normalized = normalizeText(text);
-  if (!normalized) {
-    return "无文本内容";
-  }
-  return normalized.length > 96 ? `${normalized.slice(0, 96)}...` : normalized;
-}
-
-function getSourceLocation(context: AskResponse["contexts"][number]) {
-  const parts = [String(context.source ?? "未知来源")];
-  if (typeof context.page === "number") {
-    parts.push(`第 ${context.page} 页`);
-  }
-  const sectionTitle = normalizeText(context.section_title);
-  if (sectionTitle) {
-    parts.push(sectionTitle);
-  }
-  return parts.join(" / ");
 }
 
 function getFileName(source: string, fileName?: string) {
@@ -60,27 +33,14 @@ function getFileName(source: string, fileName?: string) {
   if (trimmed) {
     return trimmed;
   }
-  const fallback = source.split(/[\\/]/).filter(Boolean).pop();
-  return fallback || source;
-}
-
-function getFolderName(source: string, fileName: string) {
-  const normalized = source.replace(/\\/g, "/");
-  const slashIndex = normalized.lastIndexOf("/");
-  if (slashIndex < 0) {
-    return "根目录";
-  }
-
-  const folder = normalized.slice(0, slashIndex).trim();
-  return folder && folder !== fileName ? folder : "根目录";
+  return source.split(/[\\/]/).filter(Boolean).pop() || source;
 }
 
 function matchesDocument(document: IngestedDocument, query: string) {
   if (!query) {
     return true;
   }
-
-  const searchableText = [
+  return [
     document.file_name ?? "",
     document.source,
     document.file_ext ?? "",
@@ -88,25 +48,38 @@ function matchesDocument(document: IngestedDocument, query: string) {
     String(document.chunk_count ?? ""),
   ]
     .join(" ")
-    .toLowerCase();
-
-  return searchableText.includes(query.toLowerCase());
+    .toLowerCase()
+    .includes(query.toLowerCase());
 }
 
-type AskPanelProps = {
-  refreshKey?: string;
-};
+function getContextPreview(text: unknown) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return "No text";
+  }
+  return normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized;
+}
 
-export function AskPanel({ refreshKey = "" }: AskPanelProps) {
+function MarkdownBlock({ content }: { content: string }) {
+  return (
+    <div className="markdownBody">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
+export function AskPanel({ refreshKey = "", onDocumentsChanged }: AskPanelProps) {
   const [question, setQuestion] = useState("");
-  const [topK, setTopK] = useState(3);
+  const [topK, setTopK] = useState(4);
   const [loading, setLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [deletingSource, setDeletingSource] = useState("");
   const [error, setError] = useState("");
   const [documentError, setDocumentError] = useState("");
   const [documents, setDocuments] = useState<IngestedDocument[]>([]);
   const [documentSearch, setDocumentSearch] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<IngestedDocument | null>(null);
   const [result, setResult] = useState<AskResponse | null>(null);
   const [selectedContextIndex, setSelectedContextIndex] = useState(0);
 
@@ -132,16 +105,26 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
     void loadDocuments();
   }, [refreshKey]);
 
+  async function handleDelete(document: IngestedDocument) {
+    setDeletingSource(document.source);
+    setDocumentError("");
+    try {
+      await deleteDocuments([document.source]);
+      setPendingDelete(null);
+      setSelectedSources((current) => current.filter((source) => source !== document.source));
+      await loadDocuments();
+      onDocumentsChanged?.();
+    } catch (caught) {
+      setDocumentError(caught instanceof Error ? caught.message : "删除失败。");
+    } finally {
+      setDeletingSource("");
+    }
+  }
+
   async function handleAsk() {
     const finalQuestion = question.trim() || DEFAULT_QUESTION;
-    if (!finalQuestion) {
-      setError("请输入问题。");
-      return;
-    }
-
     setLoading(true);
     setError("");
-
     try {
       const response = await askQuestion(finalQuestion, topK, selectedSources);
       setResult(response);
@@ -154,25 +137,6 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
     }
   }
 
-  const selectedContext = result?.contexts[selectedContextIndex];
-  const selectedSourceSet = useMemo(() => new Set(selectedSources), [selectedSources]);
-  const selectedLabel =
-    selectedSources.length > 0 ? `限定 ${selectedSources.length} 个文件` : "全库检索";
-
-  const filteredDocuments = useMemo(
-    () => documents.filter((document) => matchesDocument(document, documentSearch.trim())),
-    [documentSearch, documents],
-  );
-
-  const selectedDocumentLabels = useMemo(
-    () =>
-      selectedSources
-        .map((source) => documents.find((document) => document.source === source))
-        .filter((document): document is IngestedDocument => Boolean(document))
-        .map((document) => getFileName(document.source, document.file_name)),
-    [documents, selectedSources],
-  );
-
   function toggleSource(source: string) {
     setSelectedSources((current) =>
       current.includes(source)
@@ -181,242 +145,170 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
     );
   }
 
-  const documentCount = documents.length;
-  const visibleCount = filteredDocuments.length;
-  const hasSearch = documentSearch.trim().length > 0;
+  const filteredDocuments = useMemo(
+    () => documents.filter((document) => matchesDocument(document, documentSearch.trim())),
+    [documentSearch, documents],
+  );
+  const selectedSourceSet = useMemo(() => new Set(selectedSources), [selectedSources]);
+  const selectedContext = result?.contexts[selectedContextIndex];
 
   return (
-    <section className="panel answerPanel">
-      <div className="panelHeader panelHeaderStack">
-        <div className="panelTitleGroup">
-          <span className="panelKicker">Knowledge scope</span>
-          <h2>检索问答</h2>
-          <p className="panelLead">按文件名搜索、限定资料范围，再发起检索。</p>
+    <section className="queryPanel">
+      <div className="libraryPane">
+        <div className="panelHead">
+          <div>
+            <span className="panelKicker">Library</span>
+            <h2>知识库</h2>
+          </div>
+          <button className="ghostButton" disabled={documentsLoading} onClick={loadDocuments} type="button">
+            {documentsLoading ? "刷新中" : "刷新"}
+          </button>
         </div>
-        <div className="panelMetrics">
-          <div className="metricCard">
-            <span>文档</span>
-            <strong>{documentCount}</strong>
-          </div>
-          <div className="metricCard">
-            <span>当前可见</span>
-            <strong>{visibleCount}</strong>
-          </div>
-          <div className="metricCard">
-            <span>范围</span>
-            <strong>{selectedLabel}</strong>
-          </div>
-        </div>
-      </div>
 
-      <div className="askComposer">
-        <div className="documentScopePanel">
-          <div className="documentScopeHeader">
-            <div className="documentScopeHeaderText">
-              <strong>查询范围</strong>
-              <span>
-                {documentCount > 0
-                  ? hasSearch
-                    ? `搜索到 ${visibleCount} 个文件`
-                    : `${documentCount} 个已入库文件`
-                  : "暂无已入库文件"}
-              </span>
-            </div>
-            <div className="documentScopeActions">
-              {selectedSources.length > 0 && (
-                <button
-                  className="secondaryButton"
-                  disabled={loading}
-                  onClick={() => setSelectedSources([])}
-                  type="button"
-                >
-                  清空范围
+        <div className="libraryToolbar">
+          <input
+            aria-label="搜索文件"
+            placeholder="搜索文件"
+            value={documentSearch}
+            onChange={(event) => setDocumentSearch(event.target.value)}
+          />
+          {selectedSources.length > 0 && (
+            <button className="ghostButton" disabled={loading} onClick={() => setSelectedSources([])} type="button">
+              清空
+            </button>
+          )}
+        </div>
+
+        {documentError && <p className="notice error">{documentError}</p>}
+        {!documentError && filteredDocuments.length === 0 && (
+          <p className="notice idle">{documents.length === 0 ? "暂无文件。" : "没有匹配文件。"}</p>
+        )}
+        <div className="libraryList" aria-label="已入库文件">
+          {filteredDocuments.map((document) => {
+            const active = selectedSourceSet.has(document.source);
+            const fileName = getFileName(document.source, document.file_name);
+            return (
+              <article className={`libraryItem ${active ? "active" : ""}`} key={document.source}>
+                <button disabled={loading} onClick={() => toggleSource(document.source)} type="button">
+                  <strong>{fileName}</strong>
+                  <span>
+                    {document.chunk_count} chunks
+                    {document.file_ext ? ` / ${document.file_ext}` : ""}
+                  </span>
                 </button>
-              )}
-              <button
-                className="secondaryButton"
-                disabled={documentsLoading || loading}
-                onClick={loadDocuments}
-                type="button"
-              >
-                {documentsLoading ? "刷新中" : "刷新"}
+                <button
+                  className="iconButton danger"
+                  disabled={deletingSource === document.source}
+                  onClick={() => setPendingDelete(document)}
+                  type="button"
+                  title="删除"
+                >
+                  删除
+                </button>
+              </article>
+            );
+          })}
+        </div>
+
+        {pendingDelete && (
+          <div className="confirmPanel compact" role="alert">
+            <strong>{getFileName(pendingDelete.source, pendingDelete.file_name)}</strong>
+            <span>删除后将从检索范围移除。</span>
+            <div>
+              <button className="ghostButton" disabled={Boolean(deletingSource)} onClick={() => setPendingDelete(null)} type="button">
+                取消
+              </button>
+              <button className="dangerButton" disabled={Boolean(deletingSource)} onClick={() => void handleDelete(pendingDelete)} type="button">
+                删除
               </button>
             </div>
           </div>
+        )}
+      </div>
 
-          <div className="documentScopeToolbar">
-            <label className="documentSearchBox">
-              <span>搜索</span>
-              <input
-                aria-label="搜索已入库文件"
-                placeholder="按文件名、路径、后缀或解析器搜索"
-                value={documentSearch}
-                onChange={(event) => setDocumentSearch(event.target.value)}
-              />
-            </label>
-            <div className="documentScopeChipRow" aria-label="已选文件">
-              {selectedDocumentLabels.length > 0 ? (
-                selectedDocumentLabels.map((label) => (
-                  <span className="scopeChip" key={label}>
-                    {label}
-                  </span>
-                ))
-              ) : (
-                <span className="scopeChip muted">未限定文件</span>
-              )}
-            </div>
+      <div className="askPane">
+        <div className="panelHead">
+          <div>
+            <span className="panelKicker">Ask</span>
+            <h2>检索问答</h2>
           </div>
-
-          {documentError && <p className="scopeMessage error">{documentError}</p>}
-          {!documentError && documentCount === 0 && (
-            <p className="scopeMessage">暂无已入库文件</p>
-          )}
-          {!documentError && documentCount > 0 && filteredDocuments.length === 0 && (
-            <p className="scopeMessage">没有匹配的文件名，换个关键词试试。</p>
-          )}
-          {!documentError && filteredDocuments.length > 0 && (
-            <div className="documentScopeList" aria-label="已入库文件">
-              {filteredDocuments.map((document) => {
-                const active = selectedSourceSet.has(document.source);
-                const fileName = getFileName(document.source, document.file_name);
-                const folderName = getFolderName(document.source, fileName);
-
-                return (
-                  <button
-                    className={`documentScopeItem ${active ? "active" : ""}`}
-                    disabled={loading}
-                    key={document.source}
-                    onClick={() => toggleSource(document.source)}
-                    type="button"
-                    title={document.source}
-                  >
-                    <span className="documentScopeName">{fileName}</span>
-                    <span className="documentScopePath">{folderName}</span>
-                    <span className="documentScopeMeta">
-                      {document.chunk_count} 块
-                      {document.file_ext ? ` · ${document.file_ext}` : ""}
-                      {document.parser ? ` · ${document.parser}` : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <span className="scopePill">
+            {selectedSources.length > 0 ? `${selectedSources.length} files` : "All files"}
+          </span>
         </div>
 
-        <div className="questionBox">
-          <textarea
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder={DEFAULT_QUESTION}
-            rows={4}
-          />
-        </div>
+        <textarea
+          className="questionInput"
+          rows={5}
+          value={question}
+          placeholder={DEFAULT_QUESTION}
+          onChange={(event) => setQuestion(event.target.value)}
+        />
 
-        <div className="quickPromptRow" aria-label="常用问题">
+        <div className="promptStrip">
           {QUICK_PROMPTS.map((prompt) => (
-            <button
-              className="promptButton"
-              disabled={loading}
-              key={prompt}
-              onClick={() => setQuestion(prompt)}
-              type="button"
-            >
+            <button className="ghostButton" disabled={loading} key={prompt} onClick={() => setQuestion(prompt)} type="button">
               {prompt}
             </button>
           ))}
         </div>
 
-        <div className="askToolbar">
+        <div className="askActions">
           <label>
-            <span>召回</span>
-            <input
-              min={1}
-              max={20}
-              type="number"
-              value={topK}
-              onChange={(event) => setTopK(Number(event.target.value))}
-            />
+            <span>Top K</span>
+            <input min={1} max={20} type="number" value={topK} onChange={(event) => setTopK(Number(event.target.value))} />
           </label>
           <button disabled={loading} onClick={handleAsk} type="button">
             {loading ? "查询中" : "提问"}
           </button>
         </div>
-      </div>
 
-      {error && <p className="statusText error">{error}</p>}
+        {error && <p className="notice error">{error}</p>}
 
-      {!result && !error && (
-        <div className="answerEmpty">
-          <strong>等待提问</strong>
-          <span>可直接使用默认问题，或先限定文件范围。</span>
-        </div>
-      )}
+        {result ? (
+          <div className="answerWorkspace">
+            <div className="answerHeader">
+              <strong>{INTENT_LABELS[result.intent] ?? result.intent}</strong>
+              <span>{result.contexts.length} contexts</span>
+            </div>
+            <MarkdownBlock content={result.answer} />
 
-      {result && (
-        <div className="resultBlock">
-          <div className="sectionTitleRow">
-            <h3>回答</h3>
-            <span>
-              {INTENT_LABELS[result.intent] ?? result.intent} · {result.contexts.length} 条召回
-            </span>
-          </div>
-          <MarkdownBlock content={result.answer} />
-
-          <div className="sectionTitleRow">
-            <h3>引用来源</h3>
-            <span>点击查看原文</span>
-          </div>
-          {result.contexts.length > 0 ? (
-            <div className="contextExplorer">
-              <div className="contextSources" role="list">
-                {result.contexts.map((context, index) => {
-                  const active = index === selectedContextIndex;
-                  return (
+            {result.contexts.length > 0 && (
+              <div className="contextGrid">
+                <div className="contextList">
+                  {result.contexts.map((context, index) => (
                     <button
-                      className={`contextSourceButton ${active ? "active" : ""}`}
+                      className={index === selectedContextIndex ? "active" : ""}
                       key={`${String(context.source ?? "unknown")}-${index}`}
                       onClick={() => setSelectedContextIndex(index)}
                       type="button"
                     >
-                      <span className="contextSourceTop">
-                        <strong>{String(context.source ?? "未知来源")}</strong>
-                        {typeof context.score === "number" && (
-                          <small>{context.score.toFixed(4)}</small>
-                        )}
-                      </span>
-                      <span className="contextSourceIndex">{getSourceLocation(context)}</span>
-                      <span className="contextPreview">{getContextPreview(context.text)}</span>
+                      <strong>{getFileName(String(context.source ?? "未知来源"))}</strong>
+                      <span>{getContextPreview(context.text)}</span>
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
+                {selectedContext && (
+                  <article className="contextDetail">
+                    <header>
+                      <strong>{getFileName(String(selectedContext.source ?? "未知来源"))}</strong>
+                      {typeof selectedContext.score === "number" && (
+                        <span>{selectedContext.score.toFixed(4)}</span>
+                      )}
+                    </header>
+                    <pre>{String(selectedContext.text ?? "")}</pre>
+                  </article>
+                )}
               </div>
-
-              {selectedContext && (
-                <article className="contextDetail">
-                  <div className="contextDetailHeader">
-                    <div>
-                      <strong>{String(selectedContext.source ?? "未知来源")}</strong>
-                      {typeof selectedContext.page === "number" && (
-                        <span>第 {selectedContext.page} 页</span>
-                      )}
-                      {String(selectedContext.section_title ?? "").trim() && (
-                        <span>{String(selectedContext.section_title)}</span>
-                      )}
-                    </div>
-                    {typeof selectedContext.score === "number" && (
-                      <small>分数 {selectedContext.score.toFixed(4)}</small>
-                    )}
-                  </div>
-                  <PlainTextBlock content={String(selectedContext.text ?? "")} />
-                </article>
-              )}
-            </div>
-          ) : (
-            <p className="emptyState">没有召回上下文。</p>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        ) : (
+          <div className="emptyAnswer">
+            <strong>Ready</strong>
+            <span>{documents.length} files indexed</span>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

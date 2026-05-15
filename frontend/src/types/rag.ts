@@ -34,6 +34,10 @@ export type DocumentsResponse = {
   documents: IngestedDocument[];
 };
 
+export type DeleteDocumentsResponse = {
+  deleted_sources: string[];
+};
+
 export type AskResponse = {
   question: string;
   intent: "lookup" | "summarize" | "chat";

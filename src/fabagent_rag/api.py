@@ -31,6 +31,7 @@ class IngestRequest(BaseModel):
 
     path: str = Field(..., description="要入库的单个文件路径")
     batch_size: int = Field(default=10, ge=1, le=100, description="向量化和写入的批大小")
+    overwrite_existing: bool = False
 
 
 class IngestResponse(BaseModel):
@@ -107,6 +108,14 @@ class DuplicateSourcesResponse(BaseModel):
     duplicate_sources: list[str]
 
 
+class DeleteDocumentsRequest(BaseModel):
+    sources: list[str] = Field(..., min_length=1, description="要从知识库删除的 source")
+
+
+class DeleteDocumentsResponse(BaseModel):
+    deleted_sources: list[str]
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -142,11 +151,38 @@ def ingest(request: IngestRequest) -> dict[str, object]:
         raise HTTPException(status_code=400, detail="该接口只支持单文件路径入库。")
 
     settings = load_settings()
+    source = str(path)
+    duplicate_sources = find_existing_duplicate_sources(settings, [source])
+    if duplicate_sources and not request.overwrite_existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "检测到重复文件名，确认覆盖后再重新入库。",
+                "duplicate_sources": duplicate_sources,
+            },
+        )
+    if duplicate_sources and request.overwrite_existing:
+        delete_existing_sources(settings, duplicate_sources)
+
     try:
         result = ingest_path(settings, path, request.batch_size)
     except MilvusSchemaError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {**result, "sources": []}
+    return {**result, "sources": [source]}
+
+
+@app.delete("/documents", response_model=DeleteDocumentsResponse)
+def delete_documents(request: DeleteDocumentsRequest) -> dict[str, object]:
+    """从知识库删除指定 source 的向量记录和关键词索引。"""
+
+    settings = load_settings()
+    existing_sources = {document["source"] for document in list_ingested_documents(settings)}
+    target_sources = [source for source in request.sources if source in existing_sources]
+    if not target_sources:
+        raise HTTPException(status_code=404, detail="未找到要删除的文件。")
+
+    delete_existing_sources(settings, target_sources)
+    return {"deleted_sources": target_sources}
 
 
 @app.post("/ingest/upload", response_model=IngestResponse)

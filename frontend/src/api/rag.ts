@@ -1,6 +1,7 @@
 import type {
   AskResponse,
   ChunkConfig,
+  DeleteDocumentsResponse,
   DocumentsResponse,
   IngestResponse,
   ParseUploadResponse,
@@ -94,6 +95,17 @@ export async function getChunkConfig(): Promise<ChunkConfig> {
 export async function listDocuments(): Promise<DocumentsResponse> {
   const response = await fetch(`${API_PREFIX}/documents`);
   return readJson<DocumentsResponse>(response);
+}
+
+export async function deleteDocuments(sources: string[]): Promise<DeleteDocumentsResponse> {
+  const response = await fetch(`${API_PREFIX}/documents`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sources }),
+  });
+  return readJson<DeleteDocumentsResponse>(response);
 }
 
 export async function askQuestion(
