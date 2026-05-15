@@ -9,12 +9,14 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fabagent_rag.config import load_settings
+from fabagent_rag.full_ingest import ingest_directory as ingest_directory_full_sync
 from fabagent_rag.evaluation import DEFAULT_EVAL_SET, run_evaluation
 from fabagent_rag.milvus_store import MilvusSchemaError
-from fabagent_rag.rag_service import answer_question, ingest_directory, ingest_path
+from fabagent_rag.rag_service import answer_question, ingest_path
 
 
 PROGRESS_BAR_WIDTH = 24
+FINAL_PROGRESS_STAGES = {"完成", "已入库", "跳过", "失败"}
 
 
 def format_progress_line(stage: str, path: Path, current: int, total: int, detail: str = "") -> str:
@@ -31,42 +33,25 @@ def format_progress_line(stage: str, path: Path, current: int, total: int, detai
 
 
 class IngestProgressRenderer:
-    """把单文件处理过程渲染成会覆盖的短暂状态块。"""
+    """把单文件处理过程压成单行进度，减少全量入库时的刷屏。"""
 
     def __init__(self) -> None:
-        self._rendered_lines = 0
         self._interactive = sys.stdout.isatty()
+        self._line_width = 0
 
     def __call__(self, stage: str, path: Path, current: int, total: int, detail: str = "") -> None:
-        lines = [format_progress_line(stage, path, current, total, detail)]
-        if stage not in {"完成"}:
-            lines.append(f"  文件: {path.name}")
-            lines.append(f"  阶段: {stage}")
-            if detail:
-                lines.append(f"  细节: {detail}")
-        self._render(lines)
-
-    def _render(self, lines: list[str]) -> None:
-        self._clear()
+        line = format_progress_line(stage, path, current, total, detail)
         if self._interactive:
-            for line in lines:
-                sys.stdout.write(f"{line}\n")
+            padded = line.ljust(max(self._line_width, len(line)))
+            sys.stdout.write("\r" + padded)
             sys.stdout.flush()
-            self._rendered_lines = len(lines)
+            self._line_width = len(padded)
+            if stage in FINAL_PROGRESS_STAGES:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                self._line_width = 0
             return
-
-        for line in lines:
-            click.echo(line)
-        self._rendered_lines = 0
-
-    def _clear(self) -> None:
-        if not self._interactive or self._rendered_lines <= 0:
-            return
-
-        for _ in range(self._rendered_lines):
-            sys.stdout.write("\x1b[1A\x1b[2K")
-        sys.stdout.flush()
-        self._rendered_lines = 0
+        click.echo(line)
 
 
 @click.group()
@@ -99,25 +84,25 @@ def ingest(path: Path, batch_size: int) -> None:
 )
 @click.option("--batch-size", default=10, show_default=True, help="向量化和写入的批大小。")
 @click.option(
-    "--keep-old",
-    is_flag=True,
-    help="默认会先删除旧 collection 和 BM25 索引；加此参数后保留旧数据并追加写入。",
+    "--reset/--keep-old",
+    default=False,
+    help="默认增量同步已入库内容；需要重建 Milvus 和 BM25 索引时使用 --reset。",
 )
 def ingest_all(
     directory: Path,
     batch_size: int,
-    keep_old: bool,
+    reset: bool,
 ) -> None:
-    """将目录下所有支持的文档批量入库。"""
+    """将目录下所有支持的文档批量同步入库。"""
 
     settings = load_settings()
     renderer = IngestProgressRenderer()
     try:
-        result = ingest_directory(
+        result = ingest_directory_full_sync(
             settings,
             directory,
             batch_size=batch_size,
-            reset=not keep_old,
+            reset=reset,
             progress_callback=renderer,
         )
     except MilvusSchemaError as exc:
@@ -129,6 +114,8 @@ def ingest_all(
     sys.stdout.flush()
     click.echo(
         f"已扫描 {result['scanned_files']} 个文件，解析 {result['parsed_files']} 个，"
+        f"完整跳过 {result.get('skipped_files', 0)} 个，重建 {result.get('replaced_files', 0)} 个，"
+        f"空内容 {result.get('empty_files', 0)} 个，清理 {result.get('cleared_files', 0)} 个，"
         f"失败 {result['failed_files']} 个，写入 {result['inserted']} 个分块。"
     )
     if result["errors"]:

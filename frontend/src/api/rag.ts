@@ -8,6 +8,16 @@ import type {
 
 const API_PREFIX = "/api";
 
+export class DuplicateSourceError extends Error {
+  duplicateSources: string[];
+
+  constructor(message: string, duplicateSources: string[]) {
+    super(message);
+    this.name = "DuplicateSourceError";
+    this.duplicateSources = duplicateSources;
+  }
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>;
@@ -16,12 +26,28 @@ async function readJson<T>(response: Response): Promise<T> {
   // FastAPI 错误通常放在 detail 中。这里集中处理，组件只关心可展示的消息。
   const payload = await response.json().catch(() => null);
   const detail = payload?.detail;
+  if (detail && typeof detail === "object") {
+    const duplicateSources = detail.duplicate_sources;
+    if (Array.isArray(duplicateSources) && response.status === 409) {
+      throw new DuplicateSourceError(
+        detail.message ?? "检测到重复文件名，确认覆盖后再重新入库。",
+        duplicateSources.map((source) => String(source)),
+      );
+    }
+    if (typeof detail.message === "string") {
+      throw new Error(detail.message);
+    }
+  }
   throw new Error(typeof detail === "string" ? detail : "请求失败，请检查后端服务。");
 }
 
-export async function uploadDocuments(files: File[]): Promise<IngestResponse> {
+export async function uploadDocuments(
+  files: File[],
+  overwriteExisting = false,
+): Promise<IngestResponse> {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
+  formData.append("overwrite_existing", String(overwriteExisting));
 
   const response = await fetch(`${API_PREFIX}/ingest/upload`, {
     method: "POST",
@@ -44,13 +70,18 @@ export async function parseDocuments(files: File[]): Promise<ParseUploadResponse
 export async function ingestManualChunks(
   documents: Array<{ source: string; chunks: string[] }>,
   chunkConfig: ChunkConfig,
+  overwriteExisting = false,
 ): Promise<IngestResponse> {
   const response = await fetch(`${API_PREFIX}/ingest/chunks`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ documents, chunk_config: chunkConfig }),
+    body: JSON.stringify({
+      documents,
+      chunk_config: chunkConfig,
+      overwrite_existing: overwriteExisting,
+    }),
   });
   return readJson<IngestResponse>(response);
 }

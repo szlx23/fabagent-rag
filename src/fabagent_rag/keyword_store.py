@@ -87,6 +87,18 @@ class KeywordStore:
             )
         return len(rows)
 
+    def delete_source(self, source: str) -> int:
+        """删除某个 source 的所有关键词索引记录。"""
+
+        if not self.db_path.exists():
+            return 0
+
+        self.ensure_index()
+        with self.connect() as connection:
+            connection.execute("DELETE FROM chunks_fts WHERE source = ?", (source,))
+            row = connection.execute("SELECT changes() AS deleted_count").fetchone()
+        return int(row["deleted_count"] or 0) if row else 0
+
     def search(
         self,
         query: str,

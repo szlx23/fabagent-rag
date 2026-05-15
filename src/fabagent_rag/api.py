@@ -3,7 +3,7 @@ from typing import Annotated
 import shutil
 import tempfile
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from fabagent_rag.config import Settings, load_settings
@@ -12,6 +12,8 @@ from fabagent_rag.milvus_store import MilvusSchemaError
 from fabagent_rag.rag_service import (
     answer_question,
     build_chunk_config,
+    build_keyword_store,
+    build_store,
     ingest_documents,
     ingest_manual_chunks,
     ingest_path,
@@ -62,6 +64,7 @@ class ChunkConfigRequest(BaseModel):
 class ManualChunkIngestRequest(BaseModel):
     documents: list[ManualChunkDocument] = Field(..., min_length=1)
     chunk_config: ChunkConfigRequest | None = None
+    overwrite_existing: bool = False
 
 
 class ChunkConfigResponse(BaseModel):
@@ -97,6 +100,11 @@ class IngestedDocument(BaseModel):
 
 class DocumentsResponse(BaseModel):
     documents: list[IngestedDocument]
+
+
+class DuplicateSourcesResponse(BaseModel):
+    message: str
+    duplicate_sources: list[str]
 
 
 @app.get("/health")
@@ -144,6 +152,7 @@ def ingest(request: IngestRequest) -> dict[str, object]:
 @app.post("/ingest/upload", response_model=IngestResponse)
 def ingest_upload(
     files: Annotated[list[UploadFile], File(description="要上传并入库的文档文件")],
+    overwrite_existing: Annotated[bool, Form(False)] = False,
 ) -> dict[str, object]:
     """接收前端上传文件，解析后直接入库。
 
@@ -153,6 +162,28 @@ def ingest_upload(
 
     settings = load_settings()
     documents = parse_uploaded_files(files, settings)
+    incoming_sources = [document.source for document in documents]
+    incoming_duplicate_sources = find_request_duplicate_sources(incoming_sources)
+    if incoming_duplicate_sources:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "本次上传中存在重复文件名，请先去重后再入库。",
+                "duplicate_sources": incoming_duplicate_sources,
+            },
+        )
+
+    duplicate_sources = find_existing_duplicate_sources(settings, incoming_sources)
+    if duplicate_sources and not overwrite_existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "检测到重复文件名，确认覆盖后再重新入库。",
+                "duplicate_sources": duplicate_sources,
+            },
+        )
+    if duplicate_sources and overwrite_existing:
+        delete_existing_sources(settings, duplicate_sources)
     try:
         result = ingest_documents(settings, documents)
     except MilvusSchemaError as exc:
@@ -191,6 +222,28 @@ def ingest_chunks(request: ManualChunkIngestRequest) -> dict[str, object]:
         chunk_overlap=request_config.chunk_overlap if request_config else None,
         min_chunk_size=request_config.min_chunk_size if request_config else None,
     )
+    incoming_sources = [source for source, _ in documents]
+    incoming_duplicate_sources = find_request_duplicate_sources(incoming_sources)
+    if incoming_duplicate_sources:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "本次提交中存在重复文件名，请先去重后再入库。",
+                "duplicate_sources": incoming_duplicate_sources,
+            },
+        )
+
+    duplicate_sources = find_existing_duplicate_sources(settings, incoming_sources)
+    if duplicate_sources and not request.overwrite_existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "检测到重复文件名，确认覆盖后再重新入库。",
+                "duplicate_sources": duplicate_sources,
+            },
+        )
+    if duplicate_sources and request.overwrite_existing:
+        delete_existing_sources(settings, duplicate_sources)
     try:
         result = ingest_manual_chunks(settings, documents, chunk_config=chunk_config)
     except MilvusSchemaError as exc:
@@ -245,3 +298,42 @@ def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[Pa
                 upload.file.close()
 
     return documents
+
+
+def find_existing_duplicate_sources(settings: Settings, sources: list[str]) -> list[str]:
+    """找出上传内容里已经存在于知识库中的 source。"""
+
+    existing_sources = {document["source"] for document in list_ingested_documents(settings)}
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for source in sources:
+        if source in seen:
+            if source not in duplicates:
+                duplicates.append(source)
+            continue
+        seen.add(source)
+        if source in existing_sources and source not in duplicates:
+            duplicates.append(source)
+    return duplicates
+
+
+def find_request_duplicate_sources(sources: list[str]) -> list[str]:
+    """找出本次请求里重复出现的 source。"""
+
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for source in sources:
+        if source in seen and source not in duplicates:
+            duplicates.append(source)
+        seen.add(source)
+    return duplicates
+
+
+def delete_existing_sources(settings: Settings, sources: list[str]) -> None:
+    """删除指定 source 在向量库和关键词索引中的旧记录。"""
+
+    store = build_store(settings, 1)
+    keyword_store = build_keyword_store(settings)
+    for source in sources:
+        store.delete_source(source)
+        keyword_store.delete_source(source)

@@ -103,6 +103,21 @@ class MilvusStore:
         self.client.flush(collection_name=self.collection_name)
         return int(result["insert_count"])
 
+    def delete_source(self, source: str) -> int:
+        """删除某个 source 的所有 chunk。"""
+
+        if not self.client.has_collection(self.collection_name):
+            return 0
+
+        self.validate_collection_schema()
+        self.client.load_collection(self.collection_name)
+        result = self.client.delete(
+            collection_name=self.collection_name,
+            filter=build_source_filter_expr([source]),
+        )
+        self.client.flush(collection_name=self.collection_name)
+        return int(result.get("delete_count") or 0)
+
     def search(
         self,
         query_embedding: list[float],

@@ -1,8 +1,20 @@
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { getChunkConfig, ingestManualChunks, parseDocuments, uploadDocuments } from "../api/rag";
-import type { ChunkConfig, IngestResponse, ParsedUploadDocument } from "../types/rag";
+import {
+  DuplicateSourceError,
+  getChunkConfig,
+  ingestManualChunks,
+  listDocuments,
+  parseDocuments,
+  uploadDocuments,
+} from "../api/rag";
+import type {
+  ChunkConfig,
+  IngestResponse,
+  IngestedDocument,
+  ParsedUploadDocument,
+} from "../types/rag";
 
 const SUPPORTED_EXTENSIONS = new Set([
   ".md",
@@ -39,13 +51,66 @@ type ManualDocumentDraft = {
   chunks: ChunkDraft[];
 };
 
+type PendingOverwrite =
+  | {
+      mode: "auto";
+      files: File[];
+      duplicateSources: string[];
+    }
+  | {
+      mode: "manual";
+      documents: ManualDocumentDraft[];
+      duplicateSources: string[];
+      chunkConfig: ChunkConfig;
+    };
+
 function getFileExtension(fileName: string) {
   const lastDot = fileName.lastIndexOf(".");
   return lastDot >= 0 ? fileName.slice(lastDot).toLowerCase() : "";
 }
 
+function getFileName(source: string, fileName?: string) {
+  const trimmed = (fileName ?? "").trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  const fallback = source.split(/[\\/]/).filter(Boolean).pop();
+  return fallback || source;
+}
+
 function createChunkId(source: string, index: number) {
   return `${source}-${index}-${crypto.randomUUID()}`;
+}
+
+function getDisplayNameFromDocument(document: IngestedDocument) {
+  return getFileName(document.source, document.file_name);
+}
+
+function findRepeatedFileNames(fileNames: string[]) {
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+
+  for (const fileName of fileNames) {
+    if (seen.has(fileName) && !duplicates.includes(fileName)) {
+      duplicates.push(fileName);
+    }
+    seen.add(fileName);
+  }
+
+  return duplicates;
+}
+
+function findDuplicateFileNames(existing: IngestedDocument[], fileNames: string[]) {
+  const existingNames = new Set(existing.map((document) => getDisplayNameFromDocument(document)));
+  const duplicates: string[] = [];
+
+  for (const fileName of fileNames) {
+    if (existingNames.has(fileName) && !duplicates.includes(fileName)) {
+      duplicates.push(fileName);
+    }
+  }
+
+  return duplicates;
 }
 
 function createInitialChunks(document: ParsedUploadDocument, config: ChunkConfig): ChunkDraft[] {
@@ -129,6 +194,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
   const [chunkConfig, setChunkConfig] = useState<ChunkConfig>(FALLBACK_CHUNK_CONFIG);
   const [manualDocuments, setManualDocuments] = useState<ManualDocumentDraft[]>([]);
   const [selectedDocumentIndex, setSelectedDocumentIndex] = useState(0);
+  const [pendingOverwrite, setPendingOverwrite] = useState<PendingOverwrite | null>(null);
   const [status, setStatus] = useState<"idle" | "parsing" | "uploading" | "done" | "error">(
     "idle",
   );
@@ -169,6 +235,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     setFiles((currentFiles) => [...currentFiles, ...selectedFiles]);
     setManualDocuments([]);
     setSelectedDocumentIndex(0);
+    setPendingOverwrite(null);
     setStatus("idle");
     setMessage("");
 
@@ -180,6 +247,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     setFiles((currentFiles) => currentFiles.filter((_, index) => index !== fileIndex));
     setManualDocuments([]);
     setSelectedDocumentIndex(0);
+    setPendingOverwrite(null);
     setStatus("idle");
     setMessage("");
   }
@@ -252,7 +320,173 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     );
   }
 
-  async function handleAutoUpload() {
+  async function getDuplicateSources(fileNames: string[]) {
+    const response = await listDocuments();
+    const duplicates = findDuplicateFileNames(response.documents, fileNames);
+    return duplicates;
+  }
+
+  async function handleAutoUpload(overwriteExisting = false, overrideFiles?: File[]) {
+    const targetFiles = overrideFiles ?? files;
+    if (!canStart || !chunkConfigValid) {
+      setStatus("error");
+      setMessage(
+        !chunkConfigValid
+          ? "请检查 chunk 参数：overlap 和小 chunk 阈值必须小于 chunk 上限。"
+          : targetFiles.length === 0
+            ? "请选择至少一个文件。"
+            : "请先删除不支持的文件。",
+      );
+      return;
+    }
+
+    if (!overwriteExisting) {
+      try {
+        const repeatedSources = findRepeatedFileNames(targetFiles.map((file) => file.name));
+        if (repeatedSources.length > 0) {
+          setStatus("error");
+          setMessage(`本次选择中存在重复文件名：${repeatedSources.join("、")}。请先去重。`);
+          return;
+        }
+
+        const duplicateSources = await getDuplicateSources(targetFiles.map((file) => file.name));
+        if (duplicateSources.length > 0) {
+          setPendingOverwrite({
+            mode: "auto",
+            files: targetFiles,
+            duplicateSources,
+          });
+          setStatus("idle");
+          setMessage(`检测到重复文件名：${duplicateSources.join("、")}。是否覆盖后重新入库？`);
+          return;
+        }
+      } catch (error) {
+        setStatus("error");
+        setMessage(error instanceof Error ? error.message : "重复文件检查失败。");
+        return;
+      }
+    }
+
+    setPendingOverwrite(null);
+    setStatus("uploading");
+    setMessage(overwriteExisting ? "正在覆盖并重新入库..." : "正在自动解析、分块并写入向量库...");
+
+    try {
+      const result = await uploadDocuments(targetFiles, overwriteExisting);
+      setStatus("done");
+      setMessage(`已写入 ${result.inserted} 个分块，来源 ${result.documents} 个文件。`);
+      onIngested(result);
+    } catch (error) {
+      if (error instanceof DuplicateSourceError) {
+        setPendingOverwrite({
+          mode: "auto",
+          files: targetFiles,
+          duplicateSources: error.duplicateSources,
+        });
+        setStatus("idle");
+        setMessage(`检测到重复文件名：${error.duplicateSources.join("、")}。是否覆盖后重新入库？`);
+        return;
+      }
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "上传失败。");
+    }
+  }
+
+  async function handleManualIngest(
+    overwriteExisting = false,
+    overrideDocuments?: ManualDocumentDraft[],
+    overrideChunkConfig?: ChunkConfig,
+  ) {
+    const targetDocuments = overrideDocuments ?? manualDocuments;
+    const targetChunkConfig = overrideChunkConfig ?? chunkConfig;
+    const documents = targetDocuments.map((document) => ({
+      source: document.source,
+      chunks: document.chunks.map((chunk) => chunk.text).filter((text) => text.trim()),
+    }));
+
+    if (documents.every((document) => document.chunks.length === 0)) {
+      setStatus("error");
+      setMessage("请至少保留一个非空 chunk。");
+      return;
+    }
+
+    if (!overwriteExisting) {
+      try {
+        const repeatedSources = findRepeatedFileNames(
+          targetDocuments.map((document) => document.source),
+        );
+        if (repeatedSources.length > 0) {
+          setStatus("error");
+          setMessage(`本次提交中存在重复文件名：${repeatedSources.join("、")}。请先去重。`);
+          return;
+        }
+
+        const duplicateSources = await getDuplicateSources(targetDocuments.map((document) => document.source));
+        if (duplicateSources.length > 0) {
+          setPendingOverwrite({
+            mode: "manual",
+            documents: targetDocuments,
+            duplicateSources,
+            chunkConfig: targetChunkConfig,
+          });
+          setStatus("idle");
+          setMessage(`检测到重复文件名：${duplicateSources.join("、")}。是否覆盖后重新入库？`);
+          return;
+        }
+      } catch (error) {
+        setStatus("error");
+        setMessage(error instanceof Error ? error.message : "重复文件检查失败。");
+        return;
+      }
+    }
+
+    setPendingOverwrite(null);
+    setStatus("uploading");
+    setMessage(overwriteExisting ? "正在覆盖并写入手动确认的 chunk..." : "正在写入手动确认的 chunk...");
+
+    try {
+      const result = await ingestManualChunks(documents, targetChunkConfig, overwriteExisting);
+      setStatus("done");
+      setMessage(`已写入 ${result.inserted} 个手动 chunk。`);
+      onIngested(result);
+    } catch (error) {
+      if (error instanceof DuplicateSourceError) {
+        setPendingOverwrite({
+          mode: "manual",
+          documents: targetDocuments,
+          duplicateSources: error.duplicateSources,
+          chunkConfig: targetChunkConfig,
+        });
+        setStatus("idle");
+        setMessage(`检测到重复文件名：${error.duplicateSources.join("、")}。是否覆盖后重新入库？`);
+        return;
+      }
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "入库失败。");
+    }
+  }
+
+  function cancelOverwrite() {
+    setPendingOverwrite(null);
+    setStatus("idle");
+    setMessage("已取消覆盖操作。");
+  }
+
+  function confirmOverwrite() {
+    if (!pendingOverwrite) {
+      return;
+    }
+
+    if (pendingOverwrite.mode === "auto") {
+      void handleAutoUpload(true, pendingOverwrite.files);
+      return;
+    }
+
+    void handleManualIngest(true, pendingOverwrite.documents, pendingOverwrite.chunkConfig);
+  }
+
+  async function handleParseForManualChunks() {
+    setPendingOverwrite(null);
     if (!canStart || !chunkConfigValid) {
       setStatus("error");
       setMessage(
@@ -265,21 +499,6 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
       return;
     }
 
-    setStatus("uploading");
-    setMessage("正在自动解析、分块并写入向量库...");
-
-    try {
-      const result = await uploadDocuments(files);
-      setStatus("done");
-      setMessage(`已写入 ${result.inserted} 个分块，来源 ${result.documents} 个文件。`);
-      onIngested(result);
-    } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "上传失败。");
-    }
-  }
-
-  async function handleParseForManualChunks() {
     if (!canStart) {
       setStatus("error");
       setMessage(files.length === 0 ? "请选择至少一个文件。" : "请先删除不支持的文件。");
@@ -306,32 +525,6 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     }
   }
 
-  async function handleManualIngest() {
-    const documents = manualDocuments.map((document) => ({
-      source: document.source,
-      chunks: document.chunks.map((chunk) => chunk.text).filter((text) => text.trim()),
-    }));
-
-    if (documents.every((document) => document.chunks.length === 0)) {
-      setStatus("error");
-      setMessage("请至少保留一个非空 chunk。");
-      return;
-    }
-
-    setStatus("uploading");
-    setMessage("正在写入手动确认的 chunk...");
-
-    try {
-      const result = await ingestManualChunks(documents, chunkConfig);
-      setStatus("done");
-      setMessage(`已写入 ${result.inserted} 个手动 chunk。`);
-      onIngested(result);
-    } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "入库失败。");
-    }
-  }
-
   return (
     <section className="panel ingestionPanel">
       <div className="panelHeader">
@@ -353,7 +546,10 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
         <button
           className={chunkMode === "auto" ? "active" : ""}
           disabled={busy}
-          onClick={() => setChunkMode("auto")}
+          onClick={() => {
+            setPendingOverwrite(null);
+            setChunkMode("auto");
+          }}
           type="button"
         >
           自动分块
@@ -361,7 +557,10 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
         <button
           className={chunkMode === "manual" ? "active" : ""}
           disabled={busy}
-          onClick={() => setChunkMode("manual")}
+          onClick={() => {
+            setPendingOverwrite(null);
+            setChunkMode("manual");
+          }}
           type="button"
         >
           手动分块
@@ -419,7 +618,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
       {chunkMode === "auto" ? (
         <div className="actionBar">
           <span className="modeHint">自动解析、自动分块，适合批量导入测试资料。</span>
-          <button disabled={!canStart} onClick={handleAutoUpload} type="button">
+          <button disabled={!canStart} onClick={() => void handleAutoUpload()} type="button">
             {status === "uploading" ? "处理中" : "解析并入库"}
           </button>
         </div>
@@ -485,10 +684,10 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
             <div className="chunkEditor">
               <div className="chunkSummary">
                 <div>
-                  <strong>{manualChunkCount} 个分块</strong>
-                  <span>{manualDocuments.length} 个文档已解析</span>
-                </div>
-                <button disabled={busy} onClick={handleManualIngest} type="button">
+                <strong>{manualChunkCount} 个分块</strong>
+                <span>{manualDocuments.length} 个文档已解析</span>
+              </div>
+                <button disabled={busy} onClick={() => void handleManualIngest()} type="button">
                   {status === "uploading" ? "写入中" : "确认入库"}
                 </button>
               </div>
@@ -555,6 +754,21 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {pendingOverwrite && (
+        <div className="statusText error" role="alert">
+          <strong>发现重复文件名：</strong>
+          {pendingOverwrite.duplicateSources.join("、")}
+          <div className="inlineActions">
+            <button className="secondaryButton" disabled={busy} onClick={cancelOverwrite} type="button">
+              取消覆盖
+            </button>
+            <button disabled={busy} onClick={confirmOverwrite} type="button">
+              覆盖并重新入库
+            </button>
+          </div>
         </div>
       )}
 

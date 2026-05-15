@@ -672,6 +672,13 @@ textarea {
   background: rgb(255 141 126 / 12%);
 }
 
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .manualChunkFlow {
   display: grid;
   gap: 12px;
