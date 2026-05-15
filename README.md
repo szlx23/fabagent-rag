@@ -452,25 +452,16 @@ source / 第 x 页 / section_title
 
 ## 配置
 
-环境变量会从 `.env` 文件中加载。
+环境变量会从 `.env` 文件中加载。常用的只需要下面这些：
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `MILVUS_HOST` | `localhost` | Milvus 服务地址 |
-| `MILVUS_PORT` | `19530` | Milvus gRPC 端口 |
 | `MILVUS_COLLECTION` | `rag_documents` | Milvus 集合名称 |
-| `EMBEDDING_API_KEY` | 空 | 嵌入模型 API Key；未配置时会读取 `ARK_API_KEY` |
-| `EMBEDDING_BASE_URL` | 空 | 嵌入模型 OpenAI 兼容接口地址 |
-| `EMBEDDING_MODEL` | `doubao-embedding-text-240715` | 嵌入模型名称 |
 | `MINERU_MODEL_SOURCE` | `modelscope` | MinerU 模型下载源；国内环境建议使用 `modelscope` |
 | `MINERU_BACKEND` | `pipeline` | MinerU 解析后端；可选 `pipeline`、`vlm-http-client`、`hybrid-http-client`、`vlm-auto-engine`、`hybrid-auto-engine` |
 | `CHUNK_SIZE` | `800` | 文档分块字符数 |
 | `CHUNK_OVERLAP` | `120` | 文档分块重叠字符数 |
 | `MIN_CHUNK_SIZE` | `160` | 小 chunk 阈值；低于该值时会尝试与前后 chunk 合并 |
-| `INFERENCE_API_KEY` | 空 | 推理模型 API Key；未配置时会读取 `ARK_API_KEY` |
-| `INFERENCE_BASE_URL` | 空 | 推理模型 OpenAI 兼容接口地址 |
-| `INFERENCE_MODEL` | 空 | 推理模型名称 |
-| `KEYWORD_INDEX_PATH` | `data/indexes/bm25.sqlite3` | SQLite FTS5 BM25 关键词索引路径 |
 | `LOOKUP_VECTOR_WEIGHT` | `0.65` | `lookup` 意图下向量检索融合权重 |
 | `LOOKUP_KEYWORD_WEIGHT` | `0.35` | `lookup` 意图下 BM25 关键词检索融合权重 |
 | `SUMMARIZE_VECTOR_WEIGHT` | `0.80` | `summarize` 意图下向量检索融合权重 |
@@ -481,19 +472,17 @@ source / 第 x 页 / section_title
 
 ```text
 .
-+-- docker-compose.yml
-+-- frontend
-+   +-- src
-+       +-- api
-+       +-- components
-+       +-- types
-+-- pyproject.toml
-+-- data
-|   +-- raw
-+-- scripts
-|   +-- reset_milvus.py
-+-- src
-    +-- fabagent_rag
+├── docker-compose.yml
+├── frontend
+│   └── src
+├── scripts
+│   ├── dev.sh
+│   ├── eval.sh
+│   └── ingest_all.sh
+├── src
+│   └── fabagent_rag
+└── data
+    └── raw
 ```
 
 ## 常用命令
