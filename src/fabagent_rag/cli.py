@@ -17,7 +17,7 @@ from fabagent_rag.rag_service import answer_question, ingest_directory, ingest_p
 PROGRESS_BAR_WIDTH = 24
 
 
-def render_progress(stage: str, path: Path, current: int, total: int, detail: str = "") -> None:
+def format_progress_line(stage: str, path: Path, current: int, total: int, detail: str = "") -> str:
     """把全量入库的状态压成一条可刷新的终端进度线。"""
 
     filled = 0 if total <= 0 else int(PROGRESS_BAR_WIDTH * current / total)
@@ -27,9 +27,46 @@ def render_progress(stage: str, path: Path, current: int, total: int, detail: st
     if len(name) > 34:
         name = f"{name[:15]}...{name[-14:]}"
     suffix = f" {detail}" if detail else ""
-    line = f"全量入库 [{bar}] {current}/{total} {stage}: {name}{suffix}"
-    sys.stdout.write("\r" + line[:140].ljust(140))
-    sys.stdout.flush()
+    return f"全量入库 [{bar}] {current}/{total} {stage}: {name}{suffix}"[:140].ljust(140)
+
+
+class IngestProgressRenderer:
+    """把单文件处理过程渲染成会覆盖的短暂状态块。"""
+
+    def __init__(self) -> None:
+        self._rendered_lines = 0
+        self._interactive = sys.stdout.isatty()
+
+    def __call__(self, stage: str, path: Path, current: int, total: int, detail: str = "") -> None:
+        lines = [format_progress_line(stage, path, current, total, detail)]
+        if stage not in {"完成"}:
+            lines.append(f"  文件: {path.name}")
+            lines.append(f"  阶段: {stage}")
+            if detail:
+                lines.append(f"  细节: {detail}")
+        self._render(lines)
+
+    def _render(self, lines: list[str]) -> None:
+        self._clear()
+        if self._interactive:
+            for line in lines:
+                sys.stdout.write(f"{line}\n")
+            sys.stdout.flush()
+            self._rendered_lines = len(lines)
+            return
+
+        for line in lines:
+            click.echo(line)
+        self._rendered_lines = 0
+
+    def _clear(self) -> None:
+        if not self._interactive or self._rendered_lines <= 0:
+            return
+
+        for _ in range(self._rendered_lines):
+            sys.stdout.write("\x1b[1A\x1b[2K")
+        sys.stdout.flush()
+        self._rendered_lines = 0
 
 
 @click.group()
@@ -74,13 +111,14 @@ def ingest_all(
     """将目录下所有支持的文档批量入库。"""
 
     settings = load_settings()
+    renderer = IngestProgressRenderer()
     try:
         result = ingest_directory(
             settings,
             directory,
             batch_size=batch_size,
             reset=not keep_old,
-            progress_callback=render_progress,
+            progress_callback=renderer,
         )
     except MilvusSchemaError as exc:
         sys.stdout.write("\n")

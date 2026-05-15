@@ -120,17 +120,33 @@ def ingest_directory(
         try:
             parsed_document = parse_document(path, str(path), mineru_backend=settings.mineru_backend)
         except Exception as exc:  # noqa: BLE001 - 批量入库不能因为单文件失败直接停掉
-            errors.append({"source": str(path), "error": str(exc)})
-            report_progress(progress_callback, "失败", path, file_index, len(files), "解析失败")
+            error_message = summarize_error(exc)
+            errors.append({"source": str(path), "error": error_message})
+            report_progress(progress_callback, "失败", path, file_index, len(files), error_message)
             continue
 
         parsed_files += 1
-        report_progress(progress_callback, "切块", path, file_index, len(files))
         chunks = split_text(
             parsed_document.text,
             parsed_document.source,
             config,
             metadata=enrich_document_metadata(parsed_document),
+        )
+        report_progress(
+            progress_callback,
+            "解析完成",
+            path,
+            file_index,
+            len(files),
+            f"{len(parsed_document.text)} 字符",
+        )
+        report_progress(
+            progress_callback,
+            "切块完成",
+            path,
+            file_index,
+            len(files),
+            f"{len(chunks)} 个分块",
         )
         if not chunks:
             report_progress(progress_callback, "跳过", path, file_index, len(files), "空内容")
@@ -158,7 +174,7 @@ def ingest_directory(
             )
             inserted += store.insert(chunk_batch, embeddings)
 
-        report_progress(progress_callback, "索引", path, file_index, len(files))
+        report_progress(progress_callback, "索引完成", path, file_index, len(files))
         keyword_indexed += keyword_store.insert(chunks)
         report_progress(
             progress_callback,
@@ -297,6 +313,13 @@ def report_progress(
 
     if callback:
         callback(stage, path, current, total, detail)
+
+
+def summarize_error(exc: Exception) -> str:
+    """把长异常压成一行，避免全量入库时把终端撑爆。"""
+
+    message = str(exc).strip().splitlines()[-1] if str(exc).strip() else exc.__class__.__name__
+    return message[:180]
 
 
 def list_ingested_documents(settings: Settings) -> list[dict[str, object]]:
