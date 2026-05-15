@@ -105,28 +105,20 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 ```text
 入库链路
-┌─ 文件上传 / data/raw / 单文件
-│   ↓
-│  文件类型识别
-│   ↓
-│  Parser
-│   ↓
-│  统一文本 / Markdown
-│   ↓
-│  Chunk
-│   ↓
-│  Embedding
-└─ Milvus + BM25
+┌─ 文件解析路由
+│  ├─ Parser 分发
+│  ├─ 统一文本 / Markdown
+│  ├─ Chunk
+│  ├─ Embedding
+│  └─ Milvus + BM25
 
 查询链路
 ┌─ 用户问题
-│   ↓
-│  意图识别 + Query Plan
-│   ↓
-│  混合检索
-│   ↓
-│  上下文合并
-└─ LLM 生成回答
+│  ├─ 意图识别
+│  ├─ Query Plan
+│  ├─ 混合检索
+│  ├─ 上下文合并
+│  └─ LLM 生成回答
 ```
 
 ### 1. 文件解析策略
@@ -134,13 +126,19 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 目标是把不同格式统一转换为 Markdown/text 中间格式，后续 chunk、embedding、存储和检索都只处理这一种统一文本。
 
 ```text
-文件上传 / data/raw / 单文件
-  ↓
-文件类型识别
-  ↓
-Parser
-  ↓
-统一文本 / Markdown
+文件解析路由
+  ├─ PDF / 图片
+  │   └─ MinerU
+  ├─ DOCX / PPTX
+  │   └─ Docling
+  ├─ DOC / PPT
+  │   └─ LibreOffice -> Docling
+  ├─ XLSX
+  │   └─ pandas
+  ├─ TXT / MD
+  │   └─ native loader
+  └─ HTML / HTM
+      └─ trafilatura
 ```
 
 当前实现：
@@ -153,20 +151,19 @@ Parser
 
 解析器选择：
 
-- PDF、图片：使用 MinerU CLI，输出 Markdown
-- DOCX、PPTX：使用 Docling，输出 Markdown
-- DOC、PPT：先用 LibreOffice/soffice 转成 DOCX/PPTX，再交给 Docling
-- XLSX：使用 pandas 读取每个 sheet，再转 Markdown 表格
-- TXT：直接读取原始文本
-- MD/Markdown：直接读取原始 Markdown，不做语法校验
-- HTML：使用 trafilatura 抽正文，输出 Markdown-like 文本
+- PDF、图片：MinerU，保留版面和表格
+- DOCX、PPTX：Docling，直接转 Markdown
+- DOC、PPT：先本地转换，再复用 Docling
+- XLSX：pandas，将 sheet 转表格文本
+- TXT、MD：直接读取，不做额外语法处理
+- HTML：trafilatura，抽正文
 
-MinerU 策略：
+优化点：
 
-- 通过 `MINERU_BACKEND` 配置 MinerU backend
-- 默认 `pipeline`，适合本地 CPU-only 开发环境
-- 当前保留表格、关闭公式，优先保证文档问答和表格问答可用
-- `MINERU_MODEL_SOURCE` 默认使用 `modelscope`
+- 单一文本中间态，后续模块不再区分原始格式
+- DOC / PPT 兼容格式通过本地转换接入，不额外分叉流程
+- MinerU 只保留对 RAG 真正有价值的表格能力，避免把解析复杂度浪费在公式上
+- Markdown 直接读取，避免二次语法校验拖慢入库
 
 文件类型与 Parser 对照：
 
@@ -186,58 +183,24 @@ MinerU 策略：
 
 ```text
 统一文本 / Markdown
-  ↓
-语义块拆分
-  ↓
-同章节聚合
-  ↓
-长块兜底切分
-  ↓
-小块合并
-  ↓
-Chunk
+  ├─ 标题栈
+  ├─ 语义块拆分
+  ├─ 同章节聚合
+  ├─ 长块兜底切分
+  └─ 小块合并
+      └─ Chunk
 ```
 
-当前自动 chunk 采用结构优先策略：
+优化点：
 
-1. 先把 Markdown/text 识别为语义块
-2. 再把同一章节下的相邻语义块打包成 chunk
-3. 单个语义块超过 `CHUNK_SIZE` 时，才按长度兜底切分
-4. 最后合并过短 chunk，减少没有独立语义的小片段
-
-当前识别的语义块：
-
-- Markdown 标题
-- 普通段落
-- 有序/无序列表
-- Markdown 表格
-- fenced code block
-
-标题处理：
-
-- 使用标题栈推断 `section_title`
-- 例如 `# A`、`## B`、`### C` 下的内容会得到 `A / B / C`
-- fenced code block 中的 `#` 不会被当作标题
-
-合并策略：
-
-- 同一章节内，相邻语义块会尽量合并到一个 chunk
-- 不跨章节合并，避免一个 chunk 的来源标题指向不清
-- 小于 `MIN_CHUNK_SIZE` 的 chunk 会尝试和前后 chunk 合并
-- 合并后不能超过 `CHUNK_SIZE`
-- `CHUNK_OVERLAP` 只用于超长语义块的兜底长度切分，不作为主切分策略
-
-手动 chunk：
-
-- 前端可以先解析文件，展示初始 chunk
-- 用户可以编辑、插入、删除 chunk
-- 后端仍会过滤空 chunk，并按配置合并过短 chunk
-- 手动 chunk 的 `section_title` 会从用户提交的文本中用标题栈推断
+- 用标题栈继承章节语义，而不是把 chunk 当成纯字符串窗口
+- 先合并同章节内容，再做长度兜底，减少把语义切碎
+- 小 chunk 会和前后 chunk 合并，减少“看起来有块、实际没信息”的片段
+- 手动 chunk 入口保留，但后端仍按同一套 metadata 和长度约束入库
 
 ### 3. Metadata 策略
 
-当前 metadata 分两层：对员工展示的字段保持最小化，内部检索字段适度丰富，
-为后续关键词/向量混合检索和 metadata 加权预留空间。
+当前 metadata 分两层：对外只保留必要字段，对内保留检索和调试所需字段。
 
 对员工展示的 metadata：
 
@@ -278,12 +241,22 @@ Chunk
 - `chunk_id`：多路检索、关键词检索和向量检索合并时稳定去重
 - `ingested_at`：后续做增量更新、版本排查和数据刷新
 
-这些内部字段可以返回给 API 调试，但回答引用和前端主展示仍以
-`source`、`page`、`section_title` 为主，避免把技术字段暴露给普通使用者。
+优化点：
+
+- 对外最小化，避免把实现细节暴露给前端和 LLM
+- 对内保留 `chunk_id` 和 `parser`，方便去重和排查解析质量
+- 页码不可用时允许降级，不强迫所有格式都补齐同一套结构化信息
 
 ### 4. Embedding 策略
 
 目标是把 chunk 文本转换成向量，写入 Milvus 做相似度搜索。
+
+```text
+Chunk
+  └─ Embedding
+      └─ 归一化向量
+          └─ Milvus 相似度检索
+```
 
 当前实现：
 
@@ -293,17 +266,22 @@ Chunk
 - 入库时按批调用 embedding，默认批大小是 10
 - embedding 结果会做归一化，因此 Milvus 搜索使用 IP 可以近似 cosine similarity
 
-当前尚未实现：
+优化点：
 
-- 按模型 token limit 自动截断或重切
-- embedding 请求重试
-- embedding 缓存
-- 文档去重或 chunk 去重
-- 多路 embedding 模型
+- 批量向量化，避免逐块调用
+- 归一化后直接用 IP，减少检索侧额外逻辑
+- 不在这里做去重，去重交给 chunk_id 和检索合并层
 
 ### 5. 向量存储策略
 
 当前使用 Milvus standalone。
+
+```text
+Embedding
+  └─ Milvus
+      └─ BM25
+          └─ 混合召回
+```
 
 Collection schema：
 
@@ -326,90 +304,54 @@ Collection schema：
 - metric 使用 `IP`
 - 因为 embedding 已归一化，所以 IP 可以近似 cosine similarity
 
-重建策略：
+优化点：
 
-- 本项目不再兼容旧 collection schema
-- 修改 metadata schema 或关键词索引结构后，执行 `scripts/reset_milvus.py` 再重新入库
-- `scripts/reset_milvus.py` 会同时删除 Milvus collection 和 SQLite BM25 索引文件
-- 如果看到 `field page not exist` 或提示 collection 缺少字段，说明当前 Milvus 里还是旧 schema，需要 reset 后重新入库
+- 向量库和关键词索引同源重建，避免 schema 漂移
+- schema 变更时直接 reset，不兼容旧集合，减少隐式分支
 
 ### 6. Query 处理策略
 
 当前 query 处理采用“LLM 优先，规则兜底”的意图识别策略。
 
-当前流程：
-
-1. 用户输入原始问题
-2. 优先让 LLM 用严格 JSON 判断意图：`lookup`、`summarize`、`chat`
-3. 如果 LLM 未配置、调用失败或返回无法解析，使用规则意图识别兜底
-4. 最终意图为 `chat`：不检索 Milvus，直接闲聊回答
-5. 最终意图为 `lookup`/`summarize`：生成 Query Plan
-6. 使用原问题、重写 query、扩写 query 执行多路检索
-7. 合并去重后，把召回上下文交给推理模型生成回答
-
-规则兜底策略：
-
-- 包含“总结、概括、归纳、摘要、梳理”等关键词时，识别为 `summarize`
-- 明确的问候、感谢、自我介绍、闲聊表达，识别为 `chat`
-- 其他问题默认识别为 `lookup`
-
-规则只作为兜底，不作为主判断器。这里故意默认走 `lookup`，因为 LLM 不可用时，
-误走知识库检索比误把资料问题当成闲聊更符合当前项目目标。
-
 ```text
 用户问题
-  ↓
-LLM 意图识别
-  ↓
-规则兜底
-  ↓
-最终意图
   ├─ chat
-  │   ↓
-  │ 直接闲聊回答
+  │   └─ 直接闲聊回答
   └─ lookup / summarize
-      ↓
-    Query Plan
-      ↓
-    多 query 检索
-      ↓
-    合并去重
-      ↓
-    基于上下文回答
+      ├─ LLM 意图识别
+      ├─ 规则兜底
+      └─ Query Plan
+          ├─ original_query
+          ├─ rewritten_query
+          └─ expanded_queries
 ```
 
-LLM 意图识别策略：
+优化点：
 
-- 只允许输出 `lookup`、`summarize`、`chat`
-- 要求返回 JSON：`{"intent":"lookup"}`
-- 如果没有配置推理模型、模型调用失败、返回内容解析失败，就回退到规则兜底
-- 只有最终意图为 `lookup` 或 `summarize` 时才会访问 Milvus
-- 对 RAG 类问题，回答生成仍然受“只能根据召回上下文回答”的约束
+- 先做意图分流，再决定是否进入检索，避免无意义召回
+- Query Plan 把原问题、改写和扩写拆开，方便分别调权重和做 ablation
+- 闲聊和知识库问答共享统一入口，但不会混入检索上下文
 
-Query Plan 策略：
-
-- `original_query`：保留用户原始问题，保证不丢失真实意图
-- `rewritten_query`：让 LLM 改写成更短、更适合向量检索的查询
-- `expanded_queries`：补充同义词、英文缩写、行业写法差异
-- `lookup` 最多扩写 3 条
-- `summarize` 通常不扩写，最多扩写 1 条
-- Query Plan 生成失败时，只使用原问题检索
+Query Plan / 处理策略：
 
 ```text
 用户问题
-  ↓
-LLM 意图识别
-  ↓
-规则兜底
-  ↓
-最终意图
-  ├─ chat → 直接闲聊回答
+  ├─ chat
+  │   └─ 直接回答
   └─ lookup / summarize
-      ↓
-    Query Plan
-      ↓
-    原问题 / 重写 query / 扩写 query
+      ├─ LLM 复核
+      ├─ 规则兜底
+      └─ Query Plan
+          ├─ 原问题
+          ├─ 重写 query
+          └─ 扩写 query
 ```
+
+优化点：
+
+- query rewrite / expansion 只服务检索，不污染最终用户问题
+- lookup 和 summarize 可以走不同扩写策略和权重
+- LLM 复核失败时仍能继续跑，不把整个链路卡死
 
 当前尚未实现：
 
@@ -422,6 +364,16 @@ LLM 意图识别
 
 当前搜索策略：
 
+```text
+Query Plan
+  └─ 原问题 / 重写 query / 扩写 query
+      ├─ 向量检索
+      ├─ BM25
+      ├─ chunk_id 去重
+      └─ 分数融合
+          └─ Top-k contexts
+```
+
 - 使用 Milvus vector search + SQLite FTS5 BM25 混合检索
 - 向量搜索字段：`embedding`
 - 关键词索引字段：正文、章节标题、sheet 名、来源文件名和内容类型
@@ -432,20 +384,6 @@ LLM 意图识别
 - 多路检索结果优先按 `chunk_id` 去重
 - 重复 chunk 会合并 `vector_score` 和 `keyword_score`
 - 最终 `score` 是按 intent 加权后的融合分数
-
-```text
-Query Plan
-  ↓
-原问题 / 重写 query / 扩写 query
-  ↓
-向量检索 + BM25
-  ↓
-chunk_id 去重
-  ↓
-分数融合
-  ↓
-Top-k contexts
-```
 
 意图权重：
 
@@ -462,17 +400,22 @@ BM25 策略：
 - `content_type=table` 且 query 包含编号、数字、下划线或短横线时，会获得轻量 metadata boost
 - query 命中 `section_title` 或 `sheet_name` 时，也会获得轻量 boost
 
-当前尚未实现：
+优化点：
 
-- rerank
-- score threshold
-- MMR 去冗余
-- 同文件/同章节结果合并
-- 长上下文压缩
+- 混合检索而不是单纯向量召回，编号、表格、字段名更稳
+- 用意图权重区分 lookup 和 summarize，而不是所有问题一套权重
+- FTS5 让关键词检索保持轻量，不额外引入复杂依赖
 
 ### 8. 回答生成策略
 
 如果配置了推理模型，会调用 OpenAI 兼容 chat completions 接口生成回答。
+
+```text
+Top-k contexts
+  └─ Prompt 组装
+      └─ LLM
+          └─ 回答
+```
 
 当前 prompt 策略：
 
@@ -487,16 +430,6 @@ BM25 策略：
 - 会直接返回检索到的上下文
 - 这样可以独立排查“检索是否正常”和“生成是否正常”
 
-```text
-Top-k contexts
-  ↓
-Prompt 组装
-  ↓
-LLM
-  ↓
-回答
-```
-
 当前尚未实现：
 
 - 引用编号强约束
@@ -506,7 +439,39 @@ LLM
 - 答案后处理
 - 返回结构化 citation
 
-### 9. 前端交互策略
+优化点：
+
+- 生成阶段只消费已召回上下文，减少幻觉面
+- 推理失败时保留检索结果，方便排查召回和生成谁出了问题
+- 闲聊和 RAG 回答走不同 prompt，不混用约束
+
+### 9. 评估模块
+
+评估不是附属脚本，而是项目的一部分，用来分别看解析、chunk、检索和回答是否退化。
+
+```text
+固定语料 / 固定问题集
+  ├─ Parse
+  ├─ Chunk
+  ├─ Retrieval
+  ├─ Answer
+  └─ Report
+```
+
+当前实现：
+
+- `parse`：看不同文件类型是否成功解析
+- `chunk`：看 chunk 数量、长度分布和标题继承是否合理
+- `retrieval`：看是否命中目标 source、MRR 和 top-k 命中
+- `answer`：看答案是否基于召回上下文，是否把无答案问题说清楚
+
+优化点：
+
+- 把“能不能答”拆成“解析、切块、召回、生成”四层分别测
+- 评估集绑定真实文件和真实解析结果，避免幻觉样本
+- 同一套问题集可同时做 smoke test 和回归测试
+
+### 10. 前端交互策略
 
 当前前端是一个 RAG 工作台：
 
