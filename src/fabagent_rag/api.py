@@ -188,7 +188,7 @@ def delete_documents(request: DeleteDocumentsRequest) -> dict[str, object]:
 @app.post("/ingest/upload", response_model=IngestResponse)
 def ingest_upload(
     files: Annotated[list[UploadFile], File(description="要上传并入库的文档文件")],
-    overwrite_existing: Annotated[bool, Form(False)] = False,
+    overwrite_existing: Annotated[bool, Form()] = False,
 ) -> dict[str, object]:
     """接收前端上传文件，解析后直接入库。
 
