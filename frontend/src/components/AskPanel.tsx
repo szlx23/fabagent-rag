@@ -5,11 +5,12 @@ import remarkGfm from "remark-gfm";
 import { askQuestion, listDocuments } from "../api/rag";
 import type { AskResponse, IngestedDocument } from "../types/rag";
 
-const DEFAULT_QUESTION = "这些文档主要包含哪些半导体制造或设备操作信息？";
+const DEFAULT_QUESTION = "OPC 在半导体工艺中有哪些类型？";
 const QUICK_PROMPTS = [
-  "总结当前资料的核心内容",
-  "有哪些关键操作步骤？",
-  "列出涉及的参数和限制",
+  "洁净室人员进入前需要遵守哪些要求？",
+  "ICP-RIE 刻蚀报警时应该如何排查？",
+  "MES Hold Lot 的处理流程是什么？",
+  "SPC 报表中 Cpk、均值和标准差分别怎么看？",
 ];
 
 const INTENT_LABELS: Record<AskResponse["intent"], string> = {
