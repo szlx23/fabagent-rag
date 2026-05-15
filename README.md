@@ -163,13 +163,6 @@ flowchart LR
 - TXT、MD：直接读取，不做额外语法处理
 - HTML：trafilatura，抽正文
 
-优化点：
-
-- 单一文本中间态，后续模块不再区分原始格式
-- DOC / PPT 兼容格式通过本地转换接入，不额外分叉流程
-- MinerU 只保留对 RAG 真正有价值的表格能力，避免把解析复杂度浪费在公式上
-- Markdown 直接读取，避免二次语法校验拖慢入库
-
 文件类型与 Parser 对照：
 
 | 文件类型 | Parser | 输出 |
@@ -198,13 +191,6 @@ flowchart LR
     G --> H[小块合并]
     H --> I[Chunk]
 ```
-
-优化点：
-
-- 用标题栈继承章节语义，而不是把 chunk 当成纯字符串窗口
-- 先合并同章节内容，再做长度兜底，减少把语义切碎
-- 小 chunk 会和前后 chunk 合并，减少“看起来有块、实际没信息”的片段
-- 手动 chunk 入口保留，但后端仍按同一套 metadata 和长度约束入库
 
 ### 3. Metadata 策略
 
@@ -258,12 +244,6 @@ flowchart LR
 - `chunk_id`：多路检索、关键词检索和向量检索合并时稳定去重
 - `ingested_at`：后续做增量更新、版本排查和数据刷新
 
-优化点：
-
-- 对外最小化，避免把实现细节暴露给前端和 LLM
-- 对内保留 `chunk_id` 和 `parser`，方便去重和排查解析质量
-- 页码不可用时允许降级，不强迫所有格式都补齐同一套结构化信息
-
 ### 4. Embedding 策略
 
 目标是把 chunk 文本转换成向量，写入 Milvus 做相似度搜索。
@@ -282,12 +262,6 @@ flowchart LR
 - API key 和 base URL 当前读取 `ARK_API_KEY`、`ARK_CODING_PLAN_BASE_URL`
 - 入库时按批调用 embedding，默认批大小是 10
 - embedding 结果会做归一化，因此 Milvus 搜索使用 IP 可以近似 cosine similarity
-
-优化点：
-
-- 批量向量化，避免逐块调用
-- 归一化后直接用 IP，减少检索侧额外逻辑
-- 不在这里做去重，去重交给 chunk_id 和检索合并层
 
 ### 5. 向量存储策略
 
@@ -328,11 +302,6 @@ Collection schema：
 - metric 使用 `IP`
 - 因为 embedding 已归一化，所以 IP 可以近似 cosine similarity
 
-优化点：
-
-- 向量库和关键词索引同源重建，避免 schema 漂移
-- schema 变更时直接 reset，不兼容旧集合，减少隐式分支
-
 ### 6. Query 处理策略
 
 当前 query 处理采用“LLM 优先，规则兜底”的意图识别策略。
@@ -349,22 +318,6 @@ flowchart LR
     F --> H[rewritten_query]
     F --> I[expanded_queries]
 ```
-
-优化点：
-
-- 先做意图分流，再决定是否进入检索，避免无意义召回
-- Query Plan 把原问题、改写和扩写拆开，方便分别调权重和做 ablation
-- 闲聊和知识库问答共享统一入口，但不会混入检索上下文
-- query rewrite / expansion 只服务检索，不污染最终用户问题
-- lookup 和 summarize 可以走不同扩写策略和权重
-- LLM 复核失败时仍能继续跑，不把整个链路卡死
-
-当前尚未实现：
-
-- 多轮对话历史压缩
-- HyDE
-- metadata filter
-- 按文件、章节、页码过滤
 
 ### 7. 相似度搜索策略
 
@@ -412,13 +365,6 @@ BM25 策略：
 - `content_type=table` 且 query 包含编号、数字、下划线或短横线时，会获得轻量 metadata boost
 - query 命中 `section_title` 或 `sheet_name` 时，也会获得轻量 boost
 
-优化点：
-
-- 混合检索而不是单纯向量召回，编号、表格、字段名更稳
-- 文档范围选择基于已入库 metadata，不直接扫描 `data/raw`
-- 用意图权重区分 lookup 和 summarize，而不是所有问题一套权重
-- FTS5 让关键词检索保持轻量，不额外引入复杂依赖
-
 ### 8. 回答生成策略
 
 如果配置了推理模型，会调用 OpenAI 兼容 chat completions 接口生成回答。
@@ -442,21 +388,6 @@ flowchart LR
 - 系统不会中断问答流程
 - 会直接返回检索到的上下文
 - 这样可以独立排查“检索是否正常”和“生成是否正常”
-
-当前尚未实现：
-
-- 引用编号强约束
-- 答案置信度
-- 无答案检测
-- 多 chunk 综合推理优化
-- 答案后处理
-- 返回结构化 citation
-
-优化点：
-
-- 生成阶段只消费已召回上下文，减少幻觉面
-- 推理失败时保留检索结果，方便排查召回和生成谁出了问题
-- 闲聊和 RAG 回答走不同 prompt，不混用约束
 
 ### 9. 评估模块
 
@@ -511,13 +442,6 @@ flowchart LR
 
 端到端回答的通过规则比较保守：普通 RAG 题需要 intent 正确、source 命中，并覆盖至少一部分期望关键词；无答案题需要明确说明资料不足；闲聊题不能带检索上下文。
 
-优化点：
-
-- 把“能不能答”拆成“解析、切块、召回、生成”四层分别测
-- 评估集绑定真实文件和真实解析结果，避免幻觉样本
-- 同时比较 original query、vector、keyword、hybrid 和 planned query，能看出 query plan 与混合检索是否真的带来收益
-- 同一套问题集可通过 `--case-limit` 做 smoke test，也可以全量跑回归测试
-
 ### 10. 前端交互策略
 
 当前前端是一个 RAG 工作台：
@@ -546,6 +470,10 @@ source / 第 x 页 / section_title
 ```
 
 页码为空时不展示页码。
+
+## TODO
+
+- 重排
 
 ## 配置
 
