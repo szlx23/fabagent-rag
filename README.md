@@ -103,42 +103,46 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 总体流程：
 
-```text
-入库链路
-┌─ 文件解析路由
-│  ├─ Parser 分发
-│  ├─ 统一文本 / Markdown
-│  ├─ Chunk
-│  ├─ Embedding
-│  └─ Milvus + BM25
+```mermaid
+flowchart LR
+    subgraph Ingest[入库链路]
+        A[文件解析路由] --> B[Parser 分发]
+        B --> C[统一文本 / Markdown]
+        C --> D[Chunk]
+        D --> E[Embedding]
+        E --> F[(Milvus + BM25)]
+    end
 
-查询链路
-┌─ 用户问题
-│  ├─ 意图识别
-│  ├─ Query Plan
-│  ├─ 混合检索
-│  ├─ 上下文合并
-│  └─ LLM 生成回答
+    subgraph Query[查询链路]
+        Q[用户问题] --> I[意图识别]
+        I --> P[Query Plan]
+        P --> R[混合检索]
+        R --> M[上下文合并]
+        M --> L[LLM 生成回答]
+    end
+
+    F --> R
 ```
 
 ### 1. 文件解析策略
 
 目标是把不同格式统一转换为 Markdown/text 中间格式，后续 chunk、embedding、存储和检索都只处理这一种统一文本。
 
-```text
-文件解析路由
-  ├─ PDF / 图片
-  │   └─ MinerU
-  ├─ DOCX / PPTX
-  │   └─ Docling
-  ├─ DOC / PPT
-  │   └─ LibreOffice -> Docling
-  ├─ XLSX
-  │   └─ pandas
-  ├─ TXT / MD
-  │   └─ native loader
-  └─ HTML / HTM
-      └─ trafilatura
+```mermaid
+flowchart LR
+    A[文件解析路由] --> B{文件类型}
+    B -->|PDF / 图片| C[MinerU]
+    B -->|DOCX / PPTX| D[Docling]
+    B -->|DOC / PPT| E[LibreOffice]
+    E --> D
+    B -->|XLSX| F[pandas]
+    B -->|TXT / MD| G[native loader]
+    B -->|HTML / HTM| H[trafilatura]
+    C --> O[统一文本 / Markdown]
+    D --> O
+    F --> O
+    G --> O
+    H --> O
 ```
 
 当前实现：
@@ -181,14 +185,17 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 目标是尽量让每个 chunk 有完整语义，同时不超过 embedding 模型适合处理的长度。
 
-```text
-统一文本 / Markdown
-  ├─ 标题栈
-  ├─ 语义块拆分
-  ├─ 同章节聚合
-  ├─ 长块兜底切分
-  └─ 小块合并
-      └─ Chunk
+```mermaid
+flowchart LR
+    A[统一文本 / Markdown] --> B[标题栈识别]
+    B --> C[section_title]
+    A --> D[段落 / 列表 / 表格 / 代码块]
+    D --> E[语义块]
+    C --> F[同章节聚合]
+    E --> F
+    F --> G[长块兜底切分]
+    G --> H[小块合并]
+    H --> I[Chunk]
 ```
 
 优化点：
@@ -201,6 +208,15 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 ### 3. Metadata 策略
 
 当前 metadata 分两层：对外只保留必要字段，对内保留检索和调试所需字段。
+
+```mermaid
+flowchart LR
+    A[Chunk] --> B[展示 metadata]
+    A --> C[检索 metadata]
+    B --> D[source / page / section_title]
+    C --> E[file_ext / content_type / sheet_name]
+    C --> F[parser / chunk_id / ingested_at]
+```
 
 对员工展示的 metadata：
 
@@ -251,11 +267,11 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 目标是把 chunk 文本转换成向量，写入 Milvus 做相似度搜索。
 
-```text
-Chunk
-  └─ Embedding
-      └─ 归一化向量
-          └─ Milvus 相似度检索
+```mermaid
+flowchart LR
+    A[Chunk] --> B[Embedding]
+    B --> C[归一化向量]
+    C --> D[Milvus 相似度检索]
 ```
 
 当前实现：
@@ -276,11 +292,15 @@ Chunk
 
 当前使用 Milvus standalone。
 
-```text
-Embedding
-  └─ Milvus
-      └─ BM25
-          └─ 混合召回
+```mermaid
+flowchart LR
+    A[Chunk]
+    A --> B[向量字段]
+    A --> C[文本字段]
+    B --> D[(Milvus)]
+    C --> E[(BM25)]
+    D --> F[混合召回]
+    E --> F
 ```
 
 Collection schema：
@@ -313,17 +333,17 @@ Collection schema：
 
 当前 query 处理采用“LLM 优先，规则兜底”的意图识别策略。
 
-```text
-用户问题
-  ├─ chat
-  │   └─ 直接闲聊回答
-  └─ lookup / summarize
-      ├─ LLM 意图识别
-      ├─ 规则兜底
-      └─ Query Plan
-          ├─ original_query
-          ├─ rewritten_query
-          └─ expanded_queries
+```mermaid
+flowchart LR
+    A[用户问题] --> B[LLM 意图识别]
+    B -->|成功| C{最终意图}
+    B -->|失败| D[规则兜底]
+    D --> C
+    C -->|chat| E[直接闲聊回答]
+    C -->|lookup / summarize| F[Query Plan]
+    F --> G[original_query]
+    F --> H[rewritten_query]
+    F --> I[expanded_queries]
 ```
 
 优化点：
@@ -331,24 +351,6 @@ Collection schema：
 - 先做意图分流，再决定是否进入检索，避免无意义召回
 - Query Plan 把原问题、改写和扩写拆开，方便分别调权重和做 ablation
 - 闲聊和知识库问答共享统一入口，但不会混入检索上下文
-
-Query Plan / 处理策略：
-
-```text
-用户问题
-  ├─ chat
-  │   └─ 直接回答
-  └─ lookup / summarize
-      ├─ LLM 复核
-      ├─ 规则兜底
-      └─ Query Plan
-          ├─ 原问题
-          ├─ 重写 query
-          └─ 扩写 query
-```
-
-优化点：
-
 - query rewrite / expansion 只服务检索，不污染最终用户问题
 - lookup 和 summarize 可以走不同扩写策略和权重
 - LLM 复核失败时仍能继续跑，不把整个链路卡死
@@ -364,14 +366,17 @@ Query Plan / 处理策略：
 
 当前搜索策略：
 
-```text
-Query Plan
-  └─ 原问题 / 重写 query / 扩写 query
-      ├─ 向量检索
-      ├─ BM25
-      ├─ chunk_id 去重
-      └─ 分数融合
-          └─ Top-k contexts
+```mermaid
+flowchart LR
+    A[Query Plan] --> B[原问题 / 重写 query / 扩写 query]
+    B --> C[向量检索]
+    B --> D[BM25]
+    C --> E[vector_score]
+    D --> F[keyword_score]
+    E --> G[chunk_id 去重]
+    F --> G
+    G --> H[分数融合]
+    H --> I[Top-k contexts]
 ```
 
 - 使用 Milvus vector search + SQLite FTS5 BM25 混合检索
@@ -410,11 +415,11 @@ BM25 策略：
 
 如果配置了推理模型，会调用 OpenAI 兼容 chat completions 接口生成回答。
 
-```text
-Top-k contexts
-  └─ Prompt 组装
-      └─ LLM
-          └─ 回答
+```mermaid
+flowchart LR
+    A[Top-k contexts] --> B[Prompt 组装]
+    B --> C[LLM]
+    C --> D[回答]
 ```
 
 当前 prompt 策略：
@@ -449,13 +454,20 @@ Top-k contexts
 
 评估不是附属脚本，而是项目的一部分，用来分别看解析、chunk、检索和回答是否退化。
 
-```text
-固定语料 / 固定问题集
-  ├─ Parse
-  ├─ Chunk
-  ├─ Retrieval
-  ├─ Answer
-  └─ Report
+```mermaid
+flowchart LR
+    A[固定语料 / 固定问题集] --> B[Parse]
+    A --> C[Chunk]
+    A --> D[Retrieval]
+    A --> E[Answer]
+    B --> F[解析成功率 / 空文本率]
+    C --> G[长度分布 / 标题继承]
+    D --> H[source 命中 / MRR / top-k]
+    E --> I[groundedness / 无答案处理]
+    F --> J[Report]
+    G --> J
+    H --> J
+    I --> J
 ```
 
 当前实现：
