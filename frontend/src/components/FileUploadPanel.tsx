@@ -12,9 +12,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".png",
   ".jpg",
   ".jpeg",
-  ".doc",
   ".docx",
-  ".ppt",
   ".pptx",
   ".xlsx",
   ".html",
@@ -374,7 +372,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
         <input
           type="file"
           multiple
-          accept=".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.doc,.docx,.ppt,.pptx,.xlsx,.html,.htm"
+          accept=".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.docx,.pptx,.xlsx,.html,.htm"
           onChange={handleFilesSelected}
         />
         <span className="dropIcon" aria-hidden="true">

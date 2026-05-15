@@ -144,8 +144,6 @@ flowchart LR
     A[文件解析路由] --> B{文件类型}
     B -->|PDF / 图片| C[MinerU]
     B -->|DOCX / PPTX| D[Docling]
-    B -->|DOC / PPT| E[LibreOffice]
-    E --> D
     B -->|XLSX| F[pandas]
     B -->|TXT / MD| G[native loader]
     B -->|HTML / HTM| H[trafilatura]
@@ -168,7 +166,6 @@ flowchart LR
 
 - PDF、图片：MinerU，保留版面和表格
 - DOCX、PPTX：Docling，直接转 Markdown
-- DOC、PPT：先本地转换，再复用 Docling
 - XLSX：pandas，将 sheet 转表格文本
 - TXT、MD：直接读取，不做额外语法处理
 - HTML：trafilatura，抽正文
@@ -179,7 +176,6 @@ flowchart LR
 | --- | --- | --- |
 | PDF、PNG、JPG、JPEG | MinerU | Markdown |
 | DOCX、PPTX | Docling | Markdown |
-| DOC、PPT | LibreOffice 转换后交给 Docling | Markdown |
 | XLSX | pandas | Markdown 表格 |
 | TXT | native loader | 原始文本 |
 | MD、Markdown | native loader | 原始 Markdown |
