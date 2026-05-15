@@ -1,3 +1,5 @@
+from hashlib import sha1
+
 from pymilvus import (
     DataType,
     MilvusClient,
@@ -17,7 +19,6 @@ class MilvusStore:
         self.collection_name = collection_name
         self.dimension = dimension
         self.client = MilvusClient(uri=f"http://{host}:{port}")
-        self._field_names: set[str] | None = None
 
     def ensure_collection(self) -> None:
         """确保 Milvus collection 存在并已加载到内存。"""
@@ -28,6 +29,12 @@ class MilvusStore:
             schema.add_field("source", DataType.VARCHAR, max_length=1024)
             schema.add_field("page", DataType.INT64)
             schema.add_field("section_title", DataType.VARCHAR, max_length=1024)
+            schema.add_field("file_ext", DataType.VARCHAR, max_length=32)
+            schema.add_field("content_type", DataType.VARCHAR, max_length=64)
+            schema.add_field("sheet_name", DataType.VARCHAR, max_length=256)
+            schema.add_field("parser", DataType.VARCHAR, max_length=64)
+            schema.add_field("chunk_id", DataType.VARCHAR, max_length=64)
+            schema.add_field("ingested_at", DataType.VARCHAR, max_length=64)
             schema.add_field("text", DataType.VARCHAR, max_length=8192)
             schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=self.dimension)
 
@@ -46,27 +53,26 @@ class MilvusStore:
             )
 
         self.client.load_collection(self.collection_name)
-        self._field_names = self.collection_field_names()
 
     def insert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> int:
         """把 chunk 和对应向量写入 Milvus。"""
 
         self.ensure_collection()
-        field_names = self._field_names or self.collection_field_names()
         rows = []
         for chunk, embedding in zip(chunks, embeddings, strict=True):
             row = {
                 "source": chunk.source,
+                "page": chunk.page or 0,
+                "section_title": chunk.section_title[:1024],
+                "file_ext": chunk.file_ext[:32],
+                "content_type": chunk.content_type[:64],
+                "sheet_name": chunk.sheet_name[:256],
+                "parser": chunk.parser[:64],
+                "chunk_id": (chunk.chunk_id or build_chunk_id(chunk))[:64],
+                "ingested_at": chunk.ingested_at[:64],
                 "text": chunk.text[:8192],
                 "embedding": embedding,
             }
-            if "page" in field_names:
-                row["page"] = chunk.page or 0
-            if "section_title" in field_names:
-                row["section_title"] = chunk.section_title[:1024]
-            # 兼容已经创建过的旧 collection。新 schema 不再暴露 chunk_index。
-            if "chunk_index" in field_names:
-                row["chunk_index"] = chunk.index
             rows.append(row)
 
         if not rows:
@@ -79,11 +85,17 @@ class MilvusStore:
         """按查询向量召回 top_k 个最相似 chunk。"""
 
         self.ensure_collection()
-        field_names = self._field_names or self.collection_field_names()
         output_fields = [
-            field
-            for field in ["source", "page", "section_title", "text"]
-            if field in field_names
+            "source",
+            "page",
+            "section_title",
+            "file_ext",
+            "content_type",
+            "sheet_name",
+            "parser",
+            "chunk_id",
+            "ingested_at",
+            "text",
         ]
         results = self.client.search(
             collection_name=self.collection_name,
@@ -103,28 +115,22 @@ class MilvusStore:
                     "source": entity.get("source"),
                     "page": normalize_page(entity.get("page")),
                     "section_title": entity.get("section_title") or "",
+                    "file_ext": entity.get("file_ext") or "",
+                    "content_type": entity.get("content_type") or "",
+                    "sheet_name": entity.get("sheet_name") or "",
+                    "parser": entity.get("parser") or "",
+                    "chunk_id": entity.get("chunk_id") or "",
+                    "ingested_at": entity.get("ingested_at") or "",
                     "text": entity.get("text"),
                 }
             )
         return matches
-
-    def collection_field_names(self) -> set[str]:
-        """读取 collection 字段名，用于兼容旧 schema。"""
-
-        description = self.client.describe_collection(self.collection_name)
-        fields = description.get("fields", [])
-        return {
-            str(field.get("name") or field.get("field_name"))
-            for field in fields
-            if isinstance(field, dict) and (field.get("name") or field.get("field_name"))
-        }
 
     def drop_collection(self) -> bool:
         """删除当前 collection，常用于换 embedding 模型后重建索引。"""
 
         if self.client.has_collection(self.collection_name):
             self.client.drop_collection(self.collection_name)
-            self._field_names = None
             return True
         return False
 
@@ -138,3 +144,10 @@ def normalize_page(value: object) -> int | None:
     if not isinstance(value, int) or value <= 0:
         return None
     return value
+
+
+def build_chunk_id(chunk: Chunk) -> str:
+    """为 chunk 生成稳定 ID，用于混合检索和多路召回去重。"""
+
+    raw = f"{chunk.source}\n{chunk.index}\n{chunk.section_title}\n{chunk.text}"
+    return sha1(raw.encode("utf-8")).hexdigest()

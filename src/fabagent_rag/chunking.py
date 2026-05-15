@@ -18,6 +18,12 @@ class Chunk:
     index: int
     page: int | None = None
     section_title: str = ""
+    file_ext: str = ""
+    content_type: str = "text"
+    sheet_name: str = ""
+    parser: str = ""
+    chunk_id: str = ""
+    ingested_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,7 +59,12 @@ class ChunkDraft:
     section_title: str
 
 
-def split_text(text: str, source: str, config: ChunkConfig) -> list[Chunk]:
+def split_text(
+    text: str,
+    source: str,
+    config: ChunkConfig,
+    metadata: dict[str, str] | None = None,
+) -> list[Chunk]:
     """把文档文本切成适合 embedding 的分块。
 
     这里采用“结构优先”的切法：先按 Markdown 结构识别语义块，再把语义块打包
@@ -70,12 +81,18 @@ def split_text(text: str, source: str, config: ChunkConfig) -> list[Chunk]:
     blocks = split_markdown_blocks(clean_text)
     chunk_drafts = pack_blocks_into_chunks(blocks, config)
     merged_chunks = merge_small_chunk_drafts(chunk_drafts, config)
+    base_metadata = metadata or {}
     return [
         Chunk(
             text=chunk.text,
             source=source,
             index=index,
             section_title=chunk.section_title,
+            file_ext=base_metadata.get("file_ext", ""),
+            content_type=detect_content_type(chunk.text),
+            sheet_name=infer_sheet_name(chunk.section_title, base_metadata),
+            parser=base_metadata.get("parser", ""),
+            ingested_at=base_metadata.get("ingested_at", ""),
         )
         for index, chunk in enumerate(merged_chunks)
     ]
@@ -402,6 +419,32 @@ def can_merge(left: str, right: str, chunk_size: int) -> bool:
 
 def join_chunks(left: str, right: str) -> str:
     return f"{left.rstrip()}\n\n{right.lstrip()}".strip()
+
+
+def detect_content_type(text: str) -> str:
+    """粗粒度判断 chunk 内容类型，供后续混合检索和 metadata 加权使用。"""
+
+    stripped_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not stripped_lines:
+        return "text"
+    if any(is_table_start(stripped_lines, index) for index in range(len(stripped_lines))):
+        return "table"
+    if all(_MARKDOWN_HEADING_PATTERN.match(line) for line in stripped_lines):
+        return "title"
+    if sum(1 for line in stripped_lines if is_list_start(line)) >= max(1, len(stripped_lines) // 2):
+        return "list"
+    return "text"
+
+
+def infer_sheet_name(section_title: str, metadata: dict[str, str]) -> str:
+    """从 Excel 转出的 `Sheet: xxx` 标题里提取 sheet 名。"""
+
+    if metadata.get("file_ext") != ".xlsx":
+        return ""
+    for part in reversed([item.strip() for item in section_title.split("/")]):
+        if part.lower().startswith("sheet:"):
+            return part.split(":", 1)[1].strip()
+    return ""
 
 
 def infer_section_title(document_text: str, chunk_text: str) -> str:

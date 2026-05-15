@@ -39,14 +39,22 @@ class NativeTextParser:
     """TXT 这类纯文本文件直接读取，不做格式转换。"""
 
     def parse(self, path: Path, source: str) -> ParsedDocument:
-        return ParsedDocument(source=source, text=path.read_text(encoding="utf-8"))
+        return ParsedDocument(
+            source=source,
+            text=path.read_text(encoding="utf-8"),
+            metadata={"parser": "native", "file_ext": path.suffix.lower()},
+        )
 
 
 class MarkdownParser:
     """Markdown 文件和 TXT 一样直接读取，保留标题、列表、表格等原始标记。"""
 
     def parse(self, path: Path, source: str) -> ParsedDocument:
-        return ParsedDocument(source=source, text=path.read_text(encoding="utf-8"))
+        return ParsedDocument(
+            source=source,
+            text=path.read_text(encoding="utf-8"),
+            metadata={"parser": "markdown", "file_ext": path.suffix.lower()},
+        )
 
 
 class MinerUParser:
@@ -59,7 +67,7 @@ class MinerUParser:
         return ParsedDocument(
             source=source,
             text=parse_with_mineru(path, self.backend),
-            metadata={"parser": "mineru"},
+            metadata={"parser": "mineru", "file_ext": path.suffix.lower()},
         )
 
 
@@ -76,7 +84,7 @@ class DoclingParser:
         return ParsedDocument(
             source=source,
             text=result.document.export_to_markdown().strip(),
-            metadata={"parser": "docling"},
+            metadata={"parser": "docling", "file_ext": path.suffix.lower()},
         )
 
 
@@ -97,7 +105,11 @@ class LegacyOfficeParser:
         return ParsedDocument(
             source=parsed.source,
             text=parsed.text,
-            metadata={**parsed.metadata, "conversion": "libreoffice"},
+            metadata={
+                **parsed.metadata,
+                "file_ext": path.suffix.lower(),
+                "conversion": "libreoffice",
+            },
         )
 
 
@@ -118,7 +130,11 @@ class PandasExcelParser:
         return ParsedDocument(
             source=source,
             text="\n\n".join(sections).strip(),
-            metadata={"parser": "pandas", "sheets": ",".join(sheets.keys())},
+            metadata={
+                "parser": "pandas",
+                "file_ext": path.suffix.lower(),
+                "sheets": ",".join(sheets.keys()),
+            },
         )
 
 
@@ -141,7 +157,11 @@ class HtmlParser:
         if not text:
             raise RuntimeError(f"无法从 HTML 文件解析正文：{path}")
 
-        return ParsedDocument(source=source, text=text.strip(), metadata={"parser": "trafilatura"})
+        return ParsedDocument(
+            source=source,
+            text=text.strip(),
+            metadata={"parser": "trafilatura", "file_ext": path.suffix.lower()},
+        )
 
 
 PARSERS_BY_EXTENSION: dict[str, DocumentParser] = {

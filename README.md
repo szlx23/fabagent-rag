@@ -185,9 +185,10 @@ MinerU 策略：
 
 ### 3. Metadata 策略
 
-当前 metadata 保持最小化，只保留员工容易理解、前端能展示、后续能扩展的字段。
+当前 metadata 分两层：对员工展示的字段保持最小化，内部检索字段适度丰富，
+为后续关键词/向量混合检索和 metadata 加权预留空间。
 
-每条召回结果对外返回：
+对员工展示的 metadata：
 
 ```json
 {
@@ -203,6 +204,31 @@ MinerU 策略：
 - `page`：字段已预留；当前解析链路多数情况下拿不到可靠页码，所以未知时返回 `null`
 - `section_title`：从 Markdown 标题栈推断
 - `chunk_index`：不对前端和 LLM 暴露，避免把技术字段展示给员工
+
+内部检索 metadata：
+
+```json
+{
+  "file_ext": ".xlsx",
+  "content_type": "table",
+  "sheet_name": "SPC_Report",
+  "parser": "pandas",
+  "chunk_id": "稳定哈希",
+  "ingested_at": "2026-05-15T12:00:00+00:00"
+}
+```
+
+用途：
+
+- `file_ext`：区分 PDF、Office、Excel、Markdown 等来源类型
+- `content_type`：粗粒度区分 `text`、`table`、`list`、`title`
+- `sheet_name`：Excel 表格按 sheet 过滤或加权
+- `parser`：排查解析质量，例如 `mineru`、`docling`、`pandas`
+- `chunk_id`：多路检索、关键词检索和向量检索合并时稳定去重
+- `ingested_at`：后续做增量更新、版本排查和数据刷新
+
+这些内部字段可以返回给 API 调试，但回答引用和前端主展示仍以
+`source`、`page`、`section_title` 为主，避免把技术字段暴露给普通使用者。
 
 ### 4. Embedding 策略
 
@@ -234,6 +260,12 @@ Collection schema：
 - `source`：来源文件
 - `page`：页码，未知时内部存 0，对外返回 `null`
 - `section_title`：标题路径
+- `file_ext`：来源文件扩展名
+- `content_type`：chunk 内容类型
+- `sheet_name`：Excel sheet 名
+- `parser`：解析器名称
+- `chunk_id`：稳定 chunk 哈希
+- `ingested_at`：入库时间
 - `text`：chunk 正文，当前最多写入 8192 字符
 - `embedding`：向量字段
 
@@ -243,10 +275,10 @@ Collection schema：
 - metric 使用 `IP`
 - 因为 embedding 已归一化，所以 IP 可以近似 cosine similarity
 
-兼容策略：
+重建策略：
 
-- 如果本地已经存在旧 collection，代码会读取实际字段，尽量兼容旧 schema
-- 如果需要让旧数据也带新 metadata，建议执行 `scripts/reset_milvus.py` 后重新入库
+- 本项目不再兼容旧 collection schema
+- 修改 metadata schema 后，执行 `scripts/reset_milvus.py` 再重新入库
 
 ### 6. Query 处理策略
 

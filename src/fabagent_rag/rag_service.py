@@ -1,15 +1,17 @@
 from pathlib import Path
+from datetime import UTC, datetime
 
 from fabagent_rag.chunking import (
     Chunk,
     ChunkConfig,
     batch,
+    detect_content_type,
     infer_section_title,
     merge_small_text_chunks,
     split_text,
 )
 from fabagent_rag.config import Settings
-from fabagent_rag.documents import load_document_text
+from fabagent_rag.documents import ParsedDocument, parse_document
 from fabagent_rag.embeddings import EmbeddingModel
 from fabagent_rag.intent import detect_intent
 from fabagent_rag.llm import build_answer, build_chat_answer, classify_intent_with_llm
@@ -61,14 +63,14 @@ def ingest_path(settings: Settings, path: Path, batch_size: int) -> dict[str, in
 
     return ingest_documents(
         settings,
-        [(str(path), load_document_text(path, mineru_backend=settings.mineru_backend))],
+        [parse_document(path, str(path), mineru_backend=settings.mineru_backend)],
         batch_size=batch_size,
     )
 
 
 def ingest_documents(
     settings: Settings,
-    documents: list[tuple[str, str]],
+    documents: list[ParsedDocument | tuple[str, str]],
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
     chunk_config: ChunkConfig | None = None,
 ) -> dict[str, int]:
@@ -79,12 +81,23 @@ def ingest_documents(
     """
 
     # 到这里时，MinerU 已经把复杂文档转换成 Markdown；后续流程统一处理文本。
+    parsed_documents = normalize_documents(documents)
     chunks = [
         chunk
-        for source, text in documents
-        for chunk in split_text(text, source, chunk_config or build_chunk_config(settings))
+        for document in parsed_documents
+        for chunk in split_text(
+            document.text,
+            document.source,
+            chunk_config or build_chunk_config(settings),
+            metadata=enrich_document_metadata(document),
+        )
     ]
-    return ingest_chunks(settings, chunks, batch_size=batch_size, document_count=len(documents))
+    return ingest_chunks(
+        settings,
+        chunks,
+        batch_size=batch_size,
+        document_count=len(parsed_documents),
+    )
 
 
 def ingest_manual_chunks(
@@ -99,8 +112,10 @@ def ingest_manual_chunks(
     """
 
     config = chunk_config or build_chunk_config(settings)
+    ingested_at = current_ingested_at()
     chunks = []
     for source, texts in documents:
+        source_path = Path(source)
         merged_texts = merge_small_text_chunks(texts, config)
         document_text = "\n\n".join(merged_texts)
         chunks.extend(
@@ -109,6 +124,10 @@ def ingest_manual_chunks(
                 source=source,
                 index=index,
                 section_title=infer_section_title(document_text, text.strip()),
+                file_ext=source_path.suffix.lower(),
+                content_type=detect_content_type(text.strip()),
+                parser="manual",
+                ingested_at=ingested_at,
             )
             for index, text in enumerate(merged_texts)
             if text.strip()
@@ -225,3 +244,33 @@ def score_of(context: dict[str, object]) -> float:
     if isinstance(score, int | float):
         return float(score)
     return 0.0
+
+
+def normalize_documents(documents: list[ParsedDocument | tuple[str, str]]) -> list[ParsedDocument]:
+    """兼容旧的 `(source, text)` 调用形式，并统一成 ParsedDocument。"""
+
+    normalized = []
+    for document in documents:
+        if isinstance(document, ParsedDocument):
+            normalized.append(document)
+        else:
+            source, text = document
+            normalized.append(ParsedDocument(source=source, text=text))
+    return normalized
+
+
+def enrich_document_metadata(document: ParsedDocument) -> dict[str, str]:
+    """补齐 chunk 需要继承的文档级内部 metadata。"""
+
+    source_path = Path(document.source)
+    return {
+        **document.metadata,
+        "file_ext": document.metadata.get("file_ext") or source_path.suffix.lower(),
+        "ingested_at": document.metadata.get("ingested_at") or current_ingested_at(),
+    }
+
+
+def current_ingested_at() -> str:
+    """生成 UTC 入库时间，供后续增量更新和调试使用。"""
+
+    return datetime.now(UTC).replace(microsecond=0).isoformat()

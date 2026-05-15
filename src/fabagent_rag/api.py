@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from fabagent_rag.config import Settings, load_settings
-from fabagent_rag.documents import load_document_text
+from fabagent_rag.documents import ParsedDocument, parse_document
 from fabagent_rag.rag_service import (
     answer_question,
     build_chunk_config,
@@ -127,7 +127,7 @@ def ingest_upload(
     settings = load_settings()
     documents = parse_uploaded_files(files, settings)
     result = ingest_documents(settings, documents)
-    return {**result, "sources": [source for source, _ in documents]}
+    return {**result, "sources": [document.source for document in documents]}
 
 
 @app.post("/parse/upload", response_model=ParseUploadResponse)
@@ -142,8 +142,8 @@ def parse_upload(
     documents = parse_uploaded_files(files, load_settings())
     return {
         "documents": [
-            {"source": source, "text": text}
-            for source, text in documents
+            {"source": document.source, "text": document.text}
+            for document in documents
         ]
     }
 
@@ -173,14 +173,14 @@ def ask(request: AskRequest) -> dict[str, object]:
     return answer_question(settings, request.question, request.top_k)
 
 
-def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[tuple[str, str]]:
+def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[ParsedDocument]:
     """把上传文件保存到临时目录后解析成统一文本。"""
 
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件。")
 
     UPLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    documents: list[tuple[str, str]] = []
+    documents: list[ParsedDocument] = []
 
     with tempfile.TemporaryDirectory(dir=UPLOAD_CACHE_DIR) as temp_dir:
         temp_root = Path(temp_dir)
@@ -194,7 +194,7 @@ def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[tu
                 with temp_path.open("wb") as target:
                     shutil.copyfileobj(upload.file, target)
                 documents.append(
-                    (source, load_document_text(temp_path, mineru_backend=settings.mineru_backend))
+                    parse_document(temp_path, source, mineru_backend=settings.mineru_backend)
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
