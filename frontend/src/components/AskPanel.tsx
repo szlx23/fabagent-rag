@@ -150,6 +150,20 @@ export function AskPanel({ refreshKey = "", onDocumentsChanged }: AskPanelProps)
     [documentSearch, documents],
   );
   const selectedSourceSet = useMemo(() => new Set(selectedSources), [selectedSources]);
+  const selectedDocumentNames = useMemo(
+    () =>
+      selectedSources
+        .map((source) => documents.find((document) => document.source === source))
+        .filter((document): document is IngestedDocument => Boolean(document))
+        .map((document) => getFileName(document.source, document.file_name)),
+    [documents, selectedSources],
+  );
+  const scopeLabel =
+    selectedDocumentNames.length > 0
+      ? `将基于 ${selectedDocumentNames.slice(0, 3).join("、")}${
+          selectedDocumentNames.length > 3 ? ` 等 ${selectedDocumentNames.length} 个文件` : ""
+        } 回复`
+      : "将基于全部已入库文件回复";
   const selectedContext = result?.contexts[selectedContextIndex];
 
   return (
@@ -196,15 +210,17 @@ export function AskPanel({ refreshKey = "", onDocumentsChanged }: AskPanelProps)
                     {document.file_ext ? ` / ${document.file_ext}` : ""}
                   </span>
                 </button>
-                <button
-                  className="iconButton danger"
-                  disabled={deletingSource === document.source}
-                  onClick={() => setPendingDelete(document)}
-                  type="button"
-                  title="删除"
-                >
-                  删除
-                </button>
+                <div className="libraryItemActions">
+                  <button
+                    className="iconButton danger"
+                    disabled={deletingSource === document.source}
+                    onClick={() => setPendingDelete(document)}
+                    type="button"
+                    title="删除"
+                  >
+                    删除
+                  </button>
+                </div>
               </article>
             );
           })}
@@ -244,6 +260,10 @@ export function AskPanel({ refreshKey = "", onDocumentsChanged }: AskPanelProps)
           placeholder={DEFAULT_QUESTION}
           onChange={(event) => setQuestion(event.target.value)}
         />
+
+        <div className="scopeNotice" title={scopeLabel}>
+          <span>{scopeLabel}</span>
+        </div>
 
         <div className="promptStrip">
           {QUICK_PROMPTS.map((prompt) => (

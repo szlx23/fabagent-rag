@@ -544,6 +544,20 @@ textarea {
   background: var(--brand-soft);
 }
 
+.libraryItemActions {
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.libraryItem:hover .libraryItemActions,
+.libraryItem:focus-within .libraryItemActions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .scopePill {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -554,6 +568,24 @@ textarea {
 .questionInput {
   width: 100%;
   min-height: 132px;
+}
+
+.scopeNotice {
+  margin-top: 10px;
+  border: 1px solid #cfe1df;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.scopeNotice span {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .promptStrip {
