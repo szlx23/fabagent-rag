@@ -41,10 +41,16 @@ docker compose up -d
 cp .env.example .env
 ```
 
-4. 将文档放到 `data/raw` 目录，然后执行入库：
+4. 将文档放到 `data/raw` 目录，然后执行全量入库：
 
 ```bash
-rag ingest data/raw
+rag ingest-all
+```
+
+如果只想入库单个文件，仍然可以使用：
+
+```bash
+rag ingest data/raw/example.md
 ```
 
 5. 发起问题：
@@ -90,58 +96,68 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 如果一次上传多个文件，重复传 `files` 字段即可。服务端会用上传文件名作为检索来源，
 不会把临时解析路径写入 Milvus。
 
-## 文档解析
-
-入库流程会先识别文件类型，再分发到对应 Parser，最后统一输出 Markdown/text，后续
-chunk、embedding、Milvus 写入都复用同一套流程。
-
-| 文件类型 | Parser | 输出 |
-| --- | --- | --- |
-| PDF、PNG、JPG、JPEG | MinerU | Markdown |
-| DOCX、PPTX | Docling | Markdown |
-| DOC、PPT | LibreOffice 转换后交给 Docling | Markdown |
-| XLSX | pandas + openpyxl + tabulate | Markdown 表格 |
-| TXT | native loader | 原始文本 |
-| MD、Markdown | native loader | 原始 Markdown |
-| HTML、HTM | trafilatura | Markdown-like 正文 |
-
 ## RAG 流程与策略
 
 这一节记录当前项目从文件进入系统到最终回答的完整策略，方便 review 当前实现。
-其中有些阶段目前还是最小可用版本，后续可以逐步优化。
+当前实现把“文件解析”并入整条 RAG 流程里，解析结果只是进入 chunk、embedding、存储和检索的统一中间态。
+
+总体流程：
+
+```mermaid
+flowchart TD
+    A[文件上传 / data/raw / 单文件] --> B[文件类型识别]
+    B --> C[Parser]
+    C --> D[统一文本 / Markdown]
+    D --> E[Chunk]
+    E --> F[Embedding]
+    F --> G[Milvus + BM25]
+    H[用户问题] --> I[意图识别 + Query Plan]
+    I --> J[混合检索]
+    G --> J
+    J --> K[上下文合并]
+    K --> L[LLM 生成回答]
+```
 
 ### 1. 文件解析策略
 
-目标是把不同格式统一转换为 Markdown/text 中间格式，后续 chunk、embedding、存储和检索
-都只处理这一种统一文本。
+目标是把不同格式统一转换为 Markdown/text 中间格式，后续 chunk、embedding、存储和检索都只处理这一种统一文本。
 
 当前实现：
 
-- 单文件路径入库：`rag ingest <file>` 或 `POST /ingest`
+- 单文件入库：`rag ingest <file>` 或 `POST /ingest`
+- 目录全量入库：`rag ingest-all`，默认扫描 `data/raw`
 - 前端批量上传：`POST /ingest/upload` 或 `POST /parse/upload`
-- 不再在 `documents.py` 中处理目录和 glob pattern，批量能力放在上传接口和前端侧
 - 文件类型通过扩展名分发到不同 Parser
-- 上传文件会先保存到 `data/uploads` 下的临时目录，解析完成后删除临时文件
-- 对用户可见的来源使用上传文件名，不暴露服务端临时路径
+- 对用户可见的来源使用文件名，不暴露服务端临时路径
 
 解析器选择：
 
 - PDF、图片：使用 MinerU CLI，输出 Markdown
 - DOCX、PPTX：使用 Docling，输出 Markdown
 - DOC、PPT：先用 LibreOffice/soffice 转成 DOCX/PPTX，再交给 Docling
-- XLSX：使用 pandas 读取每个 sheet，再用 `DataFrame.to_markdown(index=False)` 转 Markdown 表格
+- XLSX：使用 pandas 读取每个 sheet，再转 Markdown 表格
 - TXT：直接读取原始文本
 - MD/Markdown：直接读取原始 Markdown，不做语法校验
 - HTML：使用 trafilatura 抽正文，输出 Markdown-like 文本
 
 MinerU 策略：
 
-- 通过 `MINERU_BACKEND` 配置 MinerU 的 backend
-- 默认 `pipeline`，更适合本地 CPU-only 开发环境
-- 可选值直接使用 MinerU 原生 backend：`pipeline`、`vlm-http-client`、`hybrid-http-client`、`vlm-auto-engine`、`hybrid-auto-engine`
-- 当前关闭公式解析：`--formula false`
-- 当前保留表格解析：`--table true`
-- `MINERU_MODEL_SOURCE` 默认使用 `modelscope`，适合国内环境下载模型
+- 通过 `MINERU_BACKEND` 配置 MinerU backend
+- 默认 `pipeline`，适合本地 CPU-only 开发环境
+- 当前保留表格、关闭公式，优先保证文档问答和表格问答可用
+- `MINERU_MODEL_SOURCE` 默认使用 `modelscope`
+
+文件类型与 Parser 对照：
+
+| 文件类型 | Parser | 输出 |
+| --- | --- | --- |
+| PDF、PNG、JPG、JPEG | MinerU | Markdown |
+| DOCX、PPTX | Docling | Markdown |
+| DOC、PPT | LibreOffice 转换后交给 Docling | Markdown |
+| XLSX | pandas | Markdown 表格 |
+| TXT | native loader | 原始文本 |
+| MD、Markdown | native loader | 原始 Markdown |
+| HTML、HTM | trafilatura | Markdown-like 正文 |
 
 ### 2. Chunk 策略
 
@@ -452,6 +468,7 @@ source / 第 x 页 / section_title
 | `LOOKUP_KEYWORD_WEIGHT` | `0.35` | `lookup` 意图下 BM25 关键词检索融合权重 |
 | `SUMMARIZE_VECTOR_WEIGHT` | `0.80` | `summarize` 意图下向量检索融合权重 |
 | `SUMMARIZE_KEYWORD_WEIGHT` | `0.20` | `summarize` 意图下 BM25 关键词检索融合权重 |
+| `RAG_PYTHON` | `/home/szlx23/conda/envs/rag/bin/python` | 一键脚本使用的 Python 解释器 |
 
 ## 项目结构
 
