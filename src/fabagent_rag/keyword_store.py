@@ -177,6 +177,7 @@ class KeywordStore:
         return [
             {
                 "source": row["source"],
+                "file_name": Path(row["source"]).name,
                 "chunk_count": int(row["chunk_count"] or 0),
                 "file_ext": row["file_ext"] or "",
                 "parser": row["parser"] or "",

@@ -19,11 +19,7 @@ const INTENT_LABELS: Record<AskResponse["intent"], string> = {
   chat: "闲聊",
 };
 
-type MarkdownBlockProps = {
-  content: string;
-};
-
-function MarkdownBlock({ content }: MarkdownBlockProps) {
+function MarkdownBlock({ content }: { content: string }) {
   return (
     <div className="markdownBody answer">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
@@ -35,8 +31,12 @@ function PlainTextBlock({ content }: { content: string }) {
   return <pre className="plainContext">{content}</pre>;
 }
 
+function normalizeText(text: unknown) {
+  return String(text ?? "").replace(/\s+/g, " ").trim();
+}
+
 function getContextPreview(text: unknown) {
-  const normalized = String(text ?? "").replace(/\s+/g, " ").trim();
+  const normalized = normalizeText(text);
   if (!normalized) {
     return "无文本内容";
   }
@@ -48,11 +48,49 @@ function getSourceLocation(context: AskResponse["contexts"][number]) {
   if (typeof context.page === "number") {
     parts.push(`第 ${context.page} 页`);
   }
-  const sectionTitle = String(context.section_title ?? "").trim();
+  const sectionTitle = normalizeText(context.section_title);
   if (sectionTitle) {
     parts.push(sectionTitle);
   }
   return parts.join(" / ");
+}
+
+function getFileName(source: string, fileName?: string) {
+  const trimmed = normalizeText(fileName);
+  if (trimmed) {
+    return trimmed;
+  }
+  const fallback = source.split(/[\\/]/).filter(Boolean).pop();
+  return fallback || source;
+}
+
+function getFolderName(source: string, fileName: string) {
+  const normalized = source.replace(/\\/g, "/");
+  const slashIndex = normalized.lastIndexOf("/");
+  if (slashIndex < 0) {
+    return "根目录";
+  }
+
+  const folder = normalized.slice(0, slashIndex).trim();
+  return folder && folder !== fileName ? folder : "根目录";
+}
+
+function matchesDocument(document: IngestedDocument, query: string) {
+  if (!query) {
+    return true;
+  }
+
+  const searchableText = [
+    document.file_name ?? "",
+    document.source,
+    document.file_ext ?? "",
+    document.parser ?? "",
+    String(document.chunk_count ?? ""),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return searchableText.includes(query.toLowerCase());
 }
 
 type AskPanelProps = {
@@ -67,6 +105,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
   const [error, setError] = useState("");
   const [documentError, setDocumentError] = useState("");
   const [documents, setDocuments] = useState<IngestedDocument[]>([]);
+  const [documentSearch, setDocumentSearch] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [result, setResult] = useState<AskResponse | null>(null);
   const [selectedContextIndex, setSelectedContextIndex] = useState(0);
@@ -120,6 +159,20 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
   const selectedLabel =
     selectedSources.length > 0 ? `限定 ${selectedSources.length} 个文件` : "全库检索";
 
+  const filteredDocuments = useMemo(
+    () => documents.filter((document) => matchesDocument(document, documentSearch.trim())),
+    [documentSearch, documents],
+  );
+
+  const selectedDocumentLabels = useMemo(
+    () =>
+      selectedSources
+        .map((source) => documents.find((document) => document.source === source))
+        .filter((document): document is IngestedDocument => Boolean(document))
+        .map((document) => getFileName(document.source, document.file_name)),
+    [documents, selectedSources],
+  );
+
   function toggleSource(source: string) {
     setSelectedSources((current) =>
       current.includes(source)
@@ -128,21 +181,46 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
     );
   }
 
+  const documentCount = documents.length;
+  const visibleCount = filteredDocuments.length;
+  const hasSearch = documentSearch.trim().length > 0;
+
   return (
     <section className="panel answerPanel">
-      <div className="panelHeader">
-        <div>
+      <div className="panelHeader panelHeaderStack">
+        <div className="panelTitleGroup">
+          <span className="panelKicker">Knowledge scope</span>
           <h2>检索问答</h2>
+          <p className="panelLead">按文件名搜索、限定资料范围，再发起检索。</p>
         </div>
-        <span className="panelBadge">{selectedLabel}</span>
+        <div className="panelMetrics">
+          <div className="metricCard">
+            <span>文档</span>
+            <strong>{documentCount}</strong>
+          </div>
+          <div className="metricCard">
+            <span>当前可见</span>
+            <strong>{visibleCount}</strong>
+          </div>
+          <div className="metricCard">
+            <span>范围</span>
+            <strong>{selectedLabel}</strong>
+          </div>
+        </div>
       </div>
 
       <div className="askComposer">
         <div className="documentScopePanel">
           <div className="documentScopeHeader">
-            <div>
+            <div className="documentScopeHeaderText">
               <strong>查询范围</strong>
-              <span>{selectedLabel}</span>
+              <span>
+                {documentCount > 0
+                  ? hasSearch
+                    ? `搜索到 ${visibleCount} 个文件`
+                    : `${documentCount} 个已入库文件`
+                  : "暂无已入库文件"}
+              </span>
             </div>
             <div className="documentScopeActions">
               {selectedSources.length > 0 && (
@@ -152,7 +230,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
                   onClick={() => setSelectedSources([])}
                   type="button"
                 >
-                  清空
+                  清空范围
                 </button>
               )}
               <button
@@ -166,14 +244,43 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
             </div>
           </div>
 
+          <div className="documentScopeToolbar">
+            <label className="documentSearchBox">
+              <span>搜索</span>
+              <input
+                aria-label="搜索已入库文件"
+                placeholder="按文件名、路径、后缀或解析器搜索"
+                value={documentSearch}
+                onChange={(event) => setDocumentSearch(event.target.value)}
+              />
+            </label>
+            <div className="documentScopeChipRow" aria-label="已选文件">
+              {selectedDocumentLabels.length > 0 ? (
+                selectedDocumentLabels.map((label) => (
+                  <span className="scopeChip" key={label}>
+                    {label}
+                  </span>
+                ))
+              ) : (
+                <span className="scopeChip muted">未限定文件</span>
+              )}
+            </div>
+          </div>
+
           {documentError && <p className="scopeMessage error">{documentError}</p>}
-          {!documentError && documents.length === 0 && (
+          {!documentError && documentCount === 0 && (
             <p className="scopeMessage">暂无已入库文件</p>
           )}
-          {documents.length > 0 && (
+          {!documentError && documentCount > 0 && filteredDocuments.length === 0 && (
+            <p className="scopeMessage">没有匹配的文件名，换个关键词试试。</p>
+          )}
+          {!documentError && filteredDocuments.length > 0 && (
             <div className="documentScopeList" aria-label="已入库文件">
-              {documents.map((document) => {
+              {filteredDocuments.map((document) => {
                 const active = selectedSourceSet.has(document.source);
+                const fileName = getFileName(document.source, document.file_name);
+                const folderName = getFolderName(document.source, fileName);
+
                 return (
                   <button
                     className={`documentScopeItem ${active ? "active" : ""}`}
@@ -181,8 +288,10 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
                     key={document.source}
                     onClick={() => toggleSource(document.source)}
                     type="button"
+                    title={document.source}
                   >
-                    <span className="documentScopeName">{document.source}</span>
+                    <span className="documentScopeName">{fileName}</span>
+                    <span className="documentScopePath">{folderName}</span>
                     <span className="documentScopeMeta">
                       {document.chunk_count} 块
                       {document.file_ext ? ` · ${document.file_ext}` : ""}
@@ -240,7 +349,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
       {!result && !error && (
         <div className="answerEmpty">
           <strong>等待提问</strong>
-          <span>可直接使用默认问题</span>
+          <span>可直接使用默认问题，或先限定文件范围。</span>
         </div>
       )}
 

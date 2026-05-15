@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { AskPanel } from "./components/AskPanel";
 import { FileUploadPanel } from "./components/FileUploadPanel";
@@ -7,17 +7,48 @@ import type { IngestResponse } from "./types/rag";
 function App() {
   const [lastIngest, setLastIngest] = useState<IngestResponse | null>(null);
 
+  const overviewCards = useMemo(
+    () => [
+      {
+        label: "已写入分块",
+        value: lastIngest ? String(lastIngest.inserted) : "0",
+        hint: lastIngest ? `${lastIngest.documents} 个文档` : "等待首次入库",
+      },
+      {
+        label: "入库来源",
+        value: lastIngest ? String(lastIngest.sources.length) : "0",
+        hint: lastIngest ? "最近批次已同步" : "尚未产生来源",
+      },
+      {
+        label: "当前状态",
+        value: lastIngest ? "Ready" : "Idle",
+        hint: lastIngest ? "可以立即检索" : "上传后即可开始问答",
+      },
+    ],
+    [lastIngest],
+  );
+
   return (
     <main className="appShell">
-      <header className="masthead">
-        <div className="brandBlock">
-          <span className="eyebrow">FabAgent RAG</span>
-          <h1>文档问答工作台</h1>
+      <div className="appBackdrop" aria-hidden="true">
+        <span className="orb orbOne" />
+        <span className="orb orbTwo" />
+        <span className="orb orbThree" />
+      </div>
+
+      <header className="heroPanel">
+        <div className="heroCopy">
+          <span className="eyebrow">FabAgent RAG / Knowledge Studio</span>
+          <h1>把文档上传、检索、问答做成一套更克制的生产级界面。</h1>
+          <p>
+            文件名优先展示，支持文档范围搜索，减少长路径在大量资料场景下的视觉噪音。
+          </p>
         </div>
-        <aside className="runtimePanel" aria-label="运行环境">
+
+        <aside className="heroStatusPanel" aria-label="运行概览">
           <div className="runtimeStatus">
             <span className="statusDot" aria-hidden="true" />
-            本地服务
+            本地服务在线
           </div>
           <dl className="runtimeGrid">
             <div>
@@ -29,35 +60,21 @@ function App() {
               <dd>Milvus</dd>
             </div>
             <div>
-              <dt>解析</dt>
-              <dd>多格式</dd>
+              <dt>索引</dt>
+              <dd>SQLite FTS5</dd>
             </div>
           </dl>
         </aside>
       </header>
 
-      <section className="workflowStrip" aria-label="工作流状态">
-        <article>
-          <span>1</span>
-          <div>
-            <strong>上传</strong>
-            <small>多格式资料</small>
-          </div>
-        </article>
-        <article>
-          <span>2</span>
-          <div>
-            <strong>入库</strong>
-            <small>自动或手动分块</small>
-          </div>
-        </article>
-        <article className="workflowStripResult">
-          <span>3</span>
-          <div>
-            <strong>{lastIngest ? `${lastIngest.inserted} 个分块` : "待查询"}</strong>
-            <small>{lastIngest ? `${lastIngest.documents} 个文档已入库` : "选择资料后开始"}</small>
-          </div>
-        </article>
+      <section className="overviewRail" aria-label="状态总览">
+        {overviewCards.map((card) => (
+          <article className="overviewCard" key={card.label}>
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+            <small>{card.hint}</small>
+          </article>
+        ))}
       </section>
 
       {lastIngest && (
@@ -72,7 +89,7 @@ function App() {
           </div>
           <div className="summarySources">
             <span>来源</span>
-            <strong>{lastIngest.sources.join("，")}</strong>
+            <strong>{lastIngest.sources.join(" · ")}</strong>
           </div>
         </section>
       )}

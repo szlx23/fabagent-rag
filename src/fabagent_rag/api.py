@@ -88,6 +88,7 @@ class AskResponse(BaseModel):
 
 class IngestedDocument(BaseModel):
     source: str
+    file_name: str = ""
     chunk_count: int
     file_ext: str = ""
     parser: str = ""

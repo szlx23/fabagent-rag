@@ -23,6 +23,7 @@ export type ChunkConfig = {
 
 export type IngestedDocument = {
   source: string;
+  file_name?: string;
   chunk_count: number;
   file_ext?: string;
   parser?: string;
