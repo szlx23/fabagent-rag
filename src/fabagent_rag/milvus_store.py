@@ -6,6 +6,26 @@ from pymilvus import (
 from fabagent_rag.chunking import Chunk, build_chunk_id
 
 
+REQUIRED_FIELDS = {
+    "id",
+    "source",
+    "page",
+    "section_title",
+    "file_ext",
+    "content_type",
+    "sheet_name",
+    "parser",
+    "chunk_id",
+    "ingested_at",
+    "text",
+    "embedding",
+}
+
+
+class MilvusSchemaError(RuntimeError):
+    """当前 Milvus collection schema 和代码要求不一致。"""
+
+
 class MilvusStore:
     """Milvus 向量库访问层。
 
@@ -49,6 +69,8 @@ class MilvusStore:
                 schema=schema,
                 index_params=index_params,
             )
+        else:
+            self.validate_collection_schema()
 
         self.client.load_collection(self.collection_name)
 
@@ -131,6 +153,34 @@ class MilvusStore:
             self.client.drop_collection(self.collection_name)
             return True
         return False
+
+    def validate_collection_schema(self) -> None:
+        """检查已存在 collection 是否符合当前 schema。
+
+        项目现在不兼容旧 schema。如果用户在升级 metadata 或混合检索后没有 reset，
+        这里会给出明确提示，避免后续 search/insert 抛出难理解的底层 Milvus 错误。
+        """
+
+        existing_fields = self.collection_field_names()
+        missing_fields = sorted(REQUIRED_FIELDS - existing_fields)
+        if missing_fields:
+            missing = ", ".join(missing_fields)
+            raise MilvusSchemaError(
+                f"Milvus collection {self.collection_name!r} 缺少字段：{missing}。"
+                "请先执行 `python scripts/reset_milvus.py` 删除旧 collection 和 BM25 索引，"
+                "然后重新入库。"
+            )
+
+    def collection_field_names(self) -> set[str]:
+        """读取 collection 字段名，用于 schema 校验。"""
+
+        description = self.client.describe_collection(self.collection_name)
+        fields = description.get("fields", [])
+        return {
+            str(field.get("name") or field.get("field_name"))
+            for field in fields
+            if isinstance(field, dict) and (field.get("name") or field.get("field_name"))
+        }
 
 
 def normalize_page(value: object) -> int | None:

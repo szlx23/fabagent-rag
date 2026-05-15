@@ -280,6 +280,7 @@ Collection schema：
 - 本项目不再兼容旧 collection schema
 - 修改 metadata schema 或关键词索引结构后，执行 `scripts/reset_milvus.py` 再重新入库
 - `scripts/reset_milvus.py` 会同时删除 Milvus collection 和 SQLite BM25 索引文件
+- 如果看到 `field page not exist` 或提示 collection 缺少字段，说明当前 Milvus 里还是旧 schema，需要 reset 后重新入库
 
 ### 6. Query 处理策略
 

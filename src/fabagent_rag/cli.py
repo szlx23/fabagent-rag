@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fabagent_rag.config import load_settings
+from fabagent_rag.milvus_store import MilvusSchemaError
 from fabagent_rag.rag_service import answer_question, ingest_path
 
 
@@ -26,7 +27,10 @@ def ingest(path: Path, batch_size: int) -> None:
     # CLI 只负责参数解析和输出；真正业务流程在 rag_service 中，FastAPI 也复用它。
     if not path.is_file():
         raise click.ClickException("ingest 只支持单文件；批量文件请使用前端上传。")
-    result = ingest_path(settings, path, batch_size)
+    try:
+        result = ingest_path(settings, path, batch_size)
+    except MilvusSchemaError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f"已从 {result['documents']} 个文档写入 {result['inserted']} 个分块。")
 
 
@@ -36,7 +40,10 @@ def ingest(path: Path, batch_size: int) -> None:
 def ask(question: str, top_k: int) -> None:
     """基于已入库文档发起问题。"""
     settings = load_settings()
-    result = answer_question(settings, question, top_k)
+    try:
+        result = answer_question(settings, question, top_k)
+    except MilvusSchemaError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(result["answer"])
 
 

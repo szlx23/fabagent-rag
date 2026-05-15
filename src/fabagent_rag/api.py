@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from fabagent_rag.config import Settings, load_settings
 from fabagent_rag.documents import ParsedDocument, parse_document
+from fabagent_rag.milvus_store import MilvusSchemaError
 from fabagent_rag.rag_service import (
     answer_question,
     build_chunk_config,
@@ -111,7 +112,10 @@ def ingest(request: IngestRequest) -> dict[str, object]:
         raise HTTPException(status_code=400, detail="该接口只支持单文件路径入库。")
 
     settings = load_settings()
-    result = ingest_path(settings, path, request.batch_size)
+    try:
+        result = ingest_path(settings, path, request.batch_size)
+    except MilvusSchemaError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {**result, "sources": []}
 
 
@@ -127,7 +131,10 @@ def ingest_upload(
 
     settings = load_settings()
     documents = parse_uploaded_files(files, settings)
-    result = ingest_documents(settings, documents)
+    try:
+        result = ingest_documents(settings, documents)
+    except MilvusSchemaError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {**result, "sources": [document.source for document in documents]}
 
 
@@ -162,7 +169,10 @@ def ingest_chunks(request: ManualChunkIngestRequest) -> dict[str, object]:
         chunk_overlap=request_config.chunk_overlap if request_config else None,
         min_chunk_size=request_config.min_chunk_size if request_config else None,
     )
-    result = ingest_manual_chunks(settings, documents, chunk_config=chunk_config)
+    try:
+        result = ingest_manual_chunks(settings, documents, chunk_config=chunk_config)
+    except MilvusSchemaError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {**result, "sources": [source for source, _ in documents]}
 
 
@@ -171,7 +181,10 @@ def ask(request: AskRequest) -> dict[str, object]:
     """查询已入库文档并返回答案和召回上下文。"""
 
     settings = load_settings()
-    return answer_question(settings, request.question, request.top_k)
+    try:
+        return answer_question(settings, request.question, request.top_k)
+    except MilvusSchemaError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def parse_uploaded_files(files: list[UploadFile], settings: Settings) -> list[ParsedDocument]:
