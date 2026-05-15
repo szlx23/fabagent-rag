@@ -103,19 +103,20 @@ curl -X POST http://127.0.0.1:8000/ingest/upload \
 
 总体流程：
 
-```mermaid
-flowchart TD
-    A[文件上传 / data/raw / 单文件] --> B[文件类型识别]
-    B --> C[Parser]
-    C --> D[统一文本 / Markdown]
-    D --> E[Chunk]
-    E --> F[Embedding]
-    F --> G[Milvus + BM25]
-    H[用户问题] --> I[意图识别 + Query Plan]
-    I --> J[混合检索]
-    G --> J
-    J --> K[上下文合并]
-    K --> L[LLM 生成回答]
+```text
+文件上传 / data/raw / 单文件
+    -> 文件类型识别
+    -> Parser
+    -> 统一文本 / Markdown
+    -> Chunk
+    -> Embedding
+    -> Milvus + BM25
+
+用户问题
+    -> 意图识别 + Query Plan
+    -> 混合检索
+    -> 上下文合并
+    -> LLM 生成回答
 ```
 
 ### 1. 文件解析策略
@@ -323,17 +324,23 @@ Collection schema：
 
 示意图：
 
-```mermaid
-flowchart TD
-    A[用户问题] --> B[LLM 意图识别]
-    B -->|成功| C{最终意图}
-    B -->|失败 / 无配置 / 解析失败| D[规则兜底识别]
-    D --> C
-    C -->|chat| E[直接闲聊回答]
-    C -->|lookup / summarize| F[Query Plan]
-    F --> G[多 query 检索]
-    G --> H[合并去重]
-    H --> I[基于上下文回答]
+```text
+用户问题
+    -> LLM 意图识别
+        -> 成功
+            -> 最终意图
+        -> 失败 / 无配置 / 解析失败
+            -> 规则兜底识别
+            -> 最终意图
+
+最终意图
+    -> chat
+        -> 直接闲聊回答
+    -> lookup / summarize
+        -> Query Plan
+        -> 多 query 检索
+        -> 合并去重
+        -> 基于上下文回答
 ```
 
 LLM 意图识别策略：
