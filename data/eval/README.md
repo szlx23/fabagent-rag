@@ -67,3 +67,32 @@ rag ask "OPC有哪些类型？" --top-k 5
 - answer 是否包含 `expected_answer_contains`
 - 无答案问题是否说明资料不足
 - 闲聊问题是否不返回 contexts
+
+## 自动评测
+
+项目现在提供了一套离线评测流水线，可直接跑四层检查：
+
+- `parse`：源文件能否稳定解析
+- `chunk`：切块数量、长度分布、标题覆盖率
+- `retrieval`：intent、query plan、vector / keyword / hybrid 召回效果
+- `answer`：端到端回答是否命中来源、是否符合无答案/闲聊控制流
+
+一键执行：
+
+```bash
+./scripts/eval.sh
+```
+
+常用变体：
+
+```bash
+./scripts/eval.sh --case-limit 10
+./scripts/eval.sh --stages parse,chunk
+./scripts/eval.sh --top-k 5
+```
+
+也可以直接使用 CLI：
+
+```bash
+rag eval
+```

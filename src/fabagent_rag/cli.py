@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fabagent_rag.config import load_settings
+from fabagent_rag.evaluation import DEFAULT_EVAL_SET, run_evaluation
 from fabagent_rag.milvus_store import MilvusSchemaError
 from fabagent_rag.rag_service import answer_question, ingest_path
 
@@ -45,6 +46,55 @@ def ask(question: str, top_k: int) -> None:
     except MilvusSchemaError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(result["answer"])
+
+
+@main.command()
+@click.option(
+    "--eval-set",
+    default=str(DEFAULT_EVAL_SET),
+    show_default=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="评测集 JSONL 文件路径。",
+)
+@click.option(
+    "--stages",
+    default="parse,chunk,retrieval,answer",
+    show_default=True,
+    help="要执行的阶段，逗号分隔。",
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="评测报告输出目录；默认按时间戳自动创建。",
+)
+@click.option("--case-limit", type=int, help="只评测前 N 条问题，便于快速 smoke test。")
+@click.option("--source-limit", type=int, help="只评测前 N 个 source，便于快速 smoke test。")
+@click.option("--top-k", "top_k_override", type=int, help="覆盖评测集里的 top-k 设置。")
+def eval(
+    eval_set: Path,
+    stages: str,
+    output_dir: Path | None,
+    case_limit: int | None,
+    source_limit: int | None,
+    top_k_override: int | None,
+) -> None:
+    """执行离线评测并生成报告。"""
+
+    stage_names = tuple(stage.strip() for stage in stages.split(",") if stage.strip())
+    settings = load_settings()
+    try:
+        report_dir = run_evaluation(
+            settings,
+            eval_set_path=eval_set,
+            stages=stage_names,
+            output_dir=output_dir,
+            case_limit=case_limit,
+            source_limit=source_limit,
+            top_k_override=top_k_override,
+        )
+    except MilvusSchemaError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"评测完成，报告目录：{report_dir}")
 
 
 if __name__ == "__main__":
