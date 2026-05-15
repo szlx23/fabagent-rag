@@ -12,6 +12,9 @@
 
 ## 选中文档
 
+扩大测试文件规模时，优先参考 [raw_dataset_selection.md](raw_dataset_selection.md)。
+该文件把 `data/raw` 中的资料分成“建议入库测试集”“暂缓入库”“建议删除或移出当前测试集”。
+
 | 文件 | 类型 | 主要测试点 |
 | --- | --- | --- |
 | `data/raw/半导体术语小记.md` | MD | 概念解释、同义词、OPC 类型 |
