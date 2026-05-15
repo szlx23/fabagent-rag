@@ -226,7 +226,18 @@ def ingest_chunks(
     }
 
 
-def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, object]:
+def list_ingested_documents(settings: Settings) -> list[dict[str, object]]:
+    """列出当前知识库中已经入库的 source。"""
+
+    return build_keyword_store(settings).list_documents()
+
+
+def answer_question(
+    settings: Settings,
+    question: str,
+    top_k: int,
+    source_filter: list[str] | None = None,
+) -> dict[str, object]:
     """完整问答流程：LLM 优先判断意图，失败时用规则兜底。"""
 
     intent = classify_intent_with_llm(
@@ -259,7 +270,7 @@ def answer_question(settings: Settings, question: str, top_k: int) -> dict[str, 
         settings.inference_base_url,
         settings.inference_model,
     )
-    contexts = search_contexts(settings, query_plan, top_k, intent)
+    contexts = search_contexts(settings, query_plan, top_k, intent, source_filter=source_filter)
     answer = build_answer(
         question,
         contexts,
@@ -281,6 +292,7 @@ def search_contexts(
     query_plan: QueryPlan,
     top_k: int,
     intent: Intent,
+    source_filter: list[str] | None = None,
 ) -> list[dict[str, object]]:
     """使用 Query Plan 中的多个 query 做向量+BM25混合检索。"""
 
@@ -290,10 +302,15 @@ def search_contexts(
     weights = hybrid_weights(settings, intent)
     queries = query_plan.queries()
     embeddings = embedder.encode(queries)
+    normalized_source_filter = normalize_source_filter(source_filter)
 
     candidates: dict[tuple[object, object, object, object, object], dict[str, object]] = {}
     for query, embedding in zip(queries, embeddings, strict=True):
-        for context in store.search(embedding, top_k=top_k * 2):
+        for context in store.search(
+            embedding,
+            top_k=top_k * 2,
+            source_filter=normalized_source_filter,
+        ):
             merge_candidate(
                 candidates,
                 {
@@ -303,7 +320,11 @@ def search_contexts(
                 },
             )
 
-        for context in keyword_store.search(query, top_k=top_k * 2):
+        for context in keyword_store.search(
+            query,
+            top_k=top_k * 2,
+            source_filter=normalized_source_filter,
+        ):
             merge_candidate(
                 candidates,
                 {
@@ -337,6 +358,14 @@ def normalize_weights(vector_weight: float, keyword_weight: float) -> tuple[floa
     if total <= 0:
         return 1.0, 0.0
     return vector_weight / total, keyword_weight / total
+
+
+def normalize_source_filter(source_filter: list[str] | None) -> list[str]:
+    """清理用户选择的 source，空列表表示不过滤。"""
+
+    if not source_filter:
+        return []
+    return sorted({source.strip() for source in source_filter if source.strip()})
 
 
 def merge_candidate(

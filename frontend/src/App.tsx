@@ -84,7 +84,9 @@ function App() {
 
       <div className="workspaceGrid">
         <FileUploadPanel onIngested={setLastIngest} />
-        <AskPanel />
+        <AskPanel
+          refreshKey={lastIngest ? `${lastIngest.inserted}-${lastIngest.sources.join("|")}` : ""}
+        />
       </div>
     </main>
   );

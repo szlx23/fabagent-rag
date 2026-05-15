@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { askQuestion } from "../api/rag";
-import type { AskResponse } from "../types/rag";
+import { askQuestion, listDocuments } from "../api/rag";
+import type { AskResponse, IngestedDocument } from "../types/rag";
 
 const DEFAULT_QUESTION = "这些文档主要包含哪些半导体制造或设备操作信息？";
 const QUICK_PROMPTS = [
@@ -51,13 +51,43 @@ function getSourceLocation(context: AskResponse["contexts"][number]) {
   return parts.join(" / ");
 }
 
-export function AskPanel() {
+type AskPanelProps = {
+  refreshKey?: string;
+};
+
+export function AskPanel({ refreshKey = "" }: AskPanelProps) {
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(3);
   const [loading, setLoading] = useState(false);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [documentError, setDocumentError] = useState("");
+  const [documents, setDocuments] = useState<IngestedDocument[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [result, setResult] = useState<AskResponse | null>(null);
   const [selectedContextIndex, setSelectedContextIndex] = useState(0);
+
+  async function loadDocuments() {
+    setDocumentsLoading(true);
+    setDocumentError("");
+    try {
+      const response = await listDocuments();
+      setDocuments(response.documents);
+      setSelectedSources((current) =>
+        current.filter((source) =>
+          response.documents.some((document) => document.source === source),
+        ),
+      );
+    } catch (caught) {
+      setDocumentError(caught instanceof Error ? caught.message : "文档列表加载失败。");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadDocuments();
+  }, [refreshKey]);
 
   async function handleAsk() {
     const finalQuestion = question.trim() || DEFAULT_QUESTION;
@@ -70,7 +100,7 @@ export function AskPanel() {
     setError("");
 
     try {
-      const response = await askQuestion(finalQuestion, topK);
+      const response = await askQuestion(finalQuestion, topK, selectedSources);
       setResult(response);
       setSelectedContextIndex(0);
     } catch (caught) {
@@ -82,6 +112,17 @@ export function AskPanel() {
   }
 
   const selectedContext = result?.contexts[selectedContextIndex];
+  const selectedSourceSet = useMemo(() => new Set(selectedSources), [selectedSources]);
+  const selectedLabel =
+    selectedSources.length > 0 ? `限定 ${selectedSources.length} 个文件` : "全库检索";
+
+  function toggleSource(source: string) {
+    setSelectedSources((current) =>
+      current.includes(source)
+        ? current.filter((item) => item !== source)
+        : [...current, source],
+    );
+  }
 
   return (
     <section className="panel answerPanel">
@@ -95,6 +136,63 @@ export function AskPanel() {
       </div>
 
       <div className="askComposer">
+        <div className="documentScopePanel">
+          <div className="documentScopeHeader">
+            <div>
+              <strong>查询范围</strong>
+              <span>{selectedLabel}</span>
+            </div>
+            <div className="documentScopeActions">
+              {selectedSources.length > 0 && (
+                <button
+                  className="secondaryButton"
+                  disabled={loading}
+                  onClick={() => setSelectedSources([])}
+                  type="button"
+                >
+                  清空选择
+                </button>
+              )}
+              <button
+                className="secondaryButton"
+                disabled={documentsLoading || loading}
+                onClick={loadDocuments}
+                type="button"
+              >
+                {documentsLoading ? "刷新中" : "刷新"}
+              </button>
+            </div>
+          </div>
+
+          {documentError && <p className="scopeMessage error">{documentError}</p>}
+          {!documentError && documents.length === 0 && (
+            <p className="scopeMessage">暂无已入库文件，完成入库后刷新列表。</p>
+          )}
+          {documents.length > 0 && (
+            <div className="documentScopeList" aria-label="已入库文件">
+              {documents.map((document) => {
+                const active = selectedSourceSet.has(document.source);
+                return (
+                  <button
+                    className={`documentScopeItem ${active ? "active" : ""}`}
+                    disabled={loading}
+                    key={document.source}
+                    onClick={() => toggleSource(document.source)}
+                    type="button"
+                  >
+                    <span className="documentScopeName">{document.source}</span>
+                    <span className="documentScopeMeta">
+                      {document.chunk_count} chunks
+                      {document.file_ext ? ` · ${document.file_ext}` : ""}
+                      {document.parser ? ` · ${document.parser}` : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         <div className="questionBox">
           <textarea
             value={question}
@@ -149,7 +247,8 @@ export function AskPanel() {
           <div className="sectionTitleRow">
             <h3>回答</h3>
             <span>
-              {INTENT_LABELS[result.intent] ?? result.intent} · {result.contexts.length} 条召回
+              {INTENT_LABELS[result.intent] ?? result.intent} · {result.contexts.length} 条召回 ·{" "}
+              {selectedLabel}
             </span>
           </div>
           <MarkdownBlock content={result.answer} variant="answer" />

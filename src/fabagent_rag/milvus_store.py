@@ -1,3 +1,5 @@
+import json
+
 from pymilvus import (
     DataType,
     MilvusClient,
@@ -101,7 +103,12 @@ class MilvusStore:
         self.client.flush(collection_name=self.collection_name)
         return int(result["insert_count"])
 
-    def search(self, query_embedding: list[float], top_k: int) -> list[dict[str, object]]:
+    def search(
+        self,
+        query_embedding: list[float],
+        top_k: int,
+        source_filter: list[str] | None = None,
+    ) -> list[dict[str, object]]:
         """按查询向量召回 top_k 个最相似 chunk。"""
 
         self.ensure_collection()
@@ -117,14 +124,19 @@ class MilvusStore:
             "ingested_at",
             "text",
         ]
-        results = self.client.search(
-            collection_name=self.collection_name,
-            data=[query_embedding],
-            limit=top_k,
-            output_fields=output_fields,
-            search_params={"metric_type": "IP", "params": {}},
-            anns_field="embedding",
-        )
+        search_kwargs = {
+            "collection_name": self.collection_name,
+            "data": [query_embedding],
+            "limit": top_k,
+            "output_fields": output_fields,
+            "search_params": {"metric_type": "IP", "params": {}},
+            "anns_field": "embedding",
+        }
+        source_expr = build_source_filter_expr(source_filter)
+        if source_expr:
+            search_kwargs["filter"] = source_expr
+
+        results = self.client.search(**search_kwargs)
 
         matches: list[dict[str, object]] = []
         for hit in results[0] if results else []:
@@ -192,3 +204,12 @@ def normalize_page(value: object) -> int | None:
     if not isinstance(value, int) or value <= 0:
         return None
     return value
+
+
+def build_source_filter_expr(source_filter: list[str] | None) -> str:
+    """构造 Milvus source 过滤表达式。"""
+
+    if not source_filter:
+        return ""
+    values = ", ".join(json.dumps(source) for source in sorted(set(source_filter)))
+    return f"source in [{values}]"

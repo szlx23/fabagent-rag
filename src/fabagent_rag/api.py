@@ -15,6 +15,7 @@ from fabagent_rag.rag_service import (
     ingest_documents,
     ingest_manual_chunks,
     ingest_path,
+    list_ingested_documents,
 )
 
 app = FastAPI(title="fabagent-rag", version="0.1.0")
@@ -74,6 +75,7 @@ class AskRequest(BaseModel):
 
     question: str = Field(..., min_length=1, description="用户问题")
     top_k: int = Field(default=4, ge=1, le=20, description="检索返回的分块数量")
+    selected_sources: list[str] = Field(default_factory=list, description="限定检索的来源文件")
 
 
 class AskResponse(BaseModel):
@@ -82,6 +84,18 @@ class AskResponse(BaseModel):
     query_plan: dict[str, object] | None = None
     answer: str
     contexts: list[dict[str, object]]
+
+
+class IngestedDocument(BaseModel):
+    source: str
+    chunk_count: int
+    file_ext: str = ""
+    parser: str = ""
+    ingested_at: str = ""
+
+
+class DocumentsResponse(BaseModel):
+    documents: list[IngestedDocument]
 
 
 @app.get("/health")
@@ -99,6 +113,13 @@ def chunk_config() -> dict[str, int]:
         "chunk_overlap": config.chunk_overlap,
         "min_chunk_size": config.min_chunk_size,
     }
+
+
+@app.get("/documents", response_model=DocumentsResponse)
+def documents() -> dict[str, object]:
+    """返回已经入库、可作为查询范围的文档列表。"""
+
+    return {"documents": list_ingested_documents(load_settings())}
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -182,7 +203,12 @@ def ask(request: AskRequest) -> dict[str, object]:
 
     settings = load_settings()
     try:
-        return answer_question(settings, request.question, request.top_k)
+        return answer_question(
+            settings,
+            request.question,
+            request.top_k,
+            source_filter=request.selected_sources,
+        )
     except MilvusSchemaError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

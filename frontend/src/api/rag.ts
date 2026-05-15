@@ -1,4 +1,10 @@
-import type { AskResponse, ChunkConfig, IngestResponse, ParseUploadResponse } from "../types/rag";
+import type {
+  AskResponse,
+  ChunkConfig,
+  DocumentsResponse,
+  IngestResponse,
+  ParseUploadResponse,
+} from "../types/rag";
 
 const API_PREFIX = "/api";
 
@@ -54,7 +60,16 @@ export async function getChunkConfig(): Promise<ChunkConfig> {
   return readJson<ChunkConfig>(response);
 }
 
-export async function askQuestion(question: string, topK: number): Promise<AskResponse> {
+export async function listDocuments(): Promise<DocumentsResponse> {
+  const response = await fetch(`${API_PREFIX}/documents`);
+  return readJson<DocumentsResponse>(response);
+}
+
+export async function askQuestion(
+  question: string,
+  topK: number,
+  selectedSources: string[],
+): Promise<AskResponse> {
   const response = await fetch(`${API_PREFIX}/ask`, {
     method: "POST",
     headers: {
@@ -63,6 +78,7 @@ export async function askQuestion(question: string, topK: number): Promise<AskRe
     body: JSON.stringify({
       question,
       top_k: topK,
+      selected_sources: selectedSources,
     }),
   });
   return readJson<AskResponse>(response);

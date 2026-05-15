@@ -87,7 +87,12 @@ class KeywordStore:
             )
         return len(rows)
 
-    def search(self, query: str, top_k: int) -> list[dict[str, object]]:
+    def search(
+        self,
+        query: str,
+        top_k: int,
+        source_filter: list[str] | None = None,
+    ) -> list[dict[str, object]]:
         """使用 FTS5 BM25 检索关键词相关 chunk。"""
 
         self.ensure_index()
@@ -95,10 +100,12 @@ class KeywordStore:
         if not match_query:
             return []
 
+        source_filter = normalize_source_filter(source_filter)
+        source_clause, source_params = build_source_filter_clause(source_filter)
         with self.connect() as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     chunk_id,
                     source,
@@ -113,10 +120,11 @@ class KeywordStore:
                     bm25(chunks_fts) AS bm25_score
                 FROM chunks_fts
                 WHERE chunks_fts MATCH ?
+                {source_clause}
                 ORDER BY bm25_score
                 LIMIT ?
                 """,
-                (match_query, top_k),
+                (match_query, *source_params, top_k),
             ).fetchall()
 
         matches = []
@@ -138,6 +146,44 @@ class KeywordStore:
                 }
             )
         return matches
+
+    def list_documents(self) -> list[dict[str, object]]:
+        """按 source 聚合已入库文档。
+
+        前端展示的是“知识库中可检索的资料”，所以这里从 BM25 索引聚合，
+        不直接扫描 data/raw，避免把未入库或入库失败的文件展示出去。
+        """
+
+        if not self.db_path.exists():
+            return []
+
+        self.ensure_index()
+        with self.connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT
+                    source,
+                    COUNT(*) AS chunk_count,
+                    MAX(file_ext) AS file_ext,
+                    MAX(parser) AS parser,
+                    MAX(ingested_at) AS ingested_at
+                FROM chunks_fts
+                GROUP BY source
+                ORDER BY source
+                """
+            ).fetchall()
+
+        return [
+            {
+                "source": row["source"],
+                "chunk_count": int(row["chunk_count"] or 0),
+                "file_ext": row["file_ext"] or "",
+                "parser": row["parser"] or "",
+                "ingested_at": row["ingested_at"] or "",
+            }
+            for row in rows
+        ]
 
     def drop_index(self) -> bool:
         """删除本地关键词索引文件。"""
@@ -210,6 +256,21 @@ def quote_fts_term(term: str) -> str:
     """转义 FTS5 查询 term。"""
 
     return '"' + term.replace('"', '""') + '"'
+
+
+def normalize_source_filter(source_filter: list[str] | None) -> list[str]:
+    if not source_filter:
+        return []
+    return sorted({source for source in source_filter if source.strip()})
+
+
+def build_source_filter_clause(source_filter: list[str]) -> tuple[str, list[str]]:
+    """构造 SQLite source 过滤条件。"""
+
+    if not source_filter:
+        return "", []
+    placeholders = ", ".join("?" for _ in source_filter)
+    return f"AND source IN ({placeholders})", source_filter
 
 
 def normalize_keyword_page(value: object) -> int | None:

@@ -566,6 +566,115 @@ textarea:focus {
   background: #f6f8f7;
 }
 
+.documentScopePanel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  border: 1px solid #dce6e3;
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #ffffff;
+}
+
+.documentScopeHeader,
+.documentScopeActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.documentScopeHeader {
+  justify-content: space-between;
+}
+
+.documentScopeHeader div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.documentScopeHeader strong {
+  color: #263640;
+  font-size: 14px;
+}
+
+.documentScopeHeader span,
+.scopeMessage,
+.documentScopeMeta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.documentScopeActions {
+  flex: 0 0 auto;
+}
+
+.documentScopeActions .secondaryButton {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.documentScopeList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.documentScopeItem {
+  display: grid;
+  gap: 5px;
+  min-height: 58px;
+  border: 1px solid #dce6e3;
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #263841;
+  background: #f8faf9;
+  text-align: left;
+}
+
+.documentScopeItem:hover:not(:disabled) {
+  border-color: #8fb7b1;
+  color: #1f3a38;
+  background: #f1faf8;
+  transform: none;
+}
+
+.documentScopeItem.active {
+  border-color: var(--accent);
+  color: #123f3b;
+  background: #edf8f5;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.documentScopeName {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentScopeMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeMessage {
+  margin: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #f6f8f7;
+}
+
+.scopeMessage.error {
+  color: var(--danger);
+  background: #fff0ed;
+}
+
 .questionBox {
   border: 1px solid #cdd8d6;
   border-radius: var(--radius);

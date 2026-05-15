@@ -21,6 +21,18 @@ export type ChunkConfig = {
   min_chunk_size: number;
 };
 
+export type IngestedDocument = {
+  source: string;
+  chunk_count: number;
+  file_ext?: string;
+  parser?: string;
+  ingested_at?: string;
+};
+
+export type DocumentsResponse = {
+  documents: IngestedDocument[];
+};
+
 export type AskResponse = {
   question: string;
   intent: "lookup" | "summarize" | "chat";
