@@ -12,26 +12,25 @@ function App() {
       <header className="masthead">
         <div className="brandBlock">
           <span className="eyebrow">FabAgent RAG</span>
-          <h1>文档知识工作台</h1>
-          <p>上传资料、审核分块、检索问答，并始终保留答案来源。</p>
+          <h1>文档问答工作台</h1>
         </div>
         <aside className="runtimePanel" aria-label="运行环境">
           <div className="runtimeStatus">
             <span className="statusDot" aria-hidden="true" />
-            Local runtime
+            本地服务
           </div>
           <dl className="runtimeGrid">
             <div>
-              <dt>API</dt>
+              <dt>接口</dt>
               <dd>FastAPI</dd>
             </div>
             <div>
-              <dt>Vector DB</dt>
+              <dt>向量库</dt>
               <dd>Milvus</dd>
             </div>
             <div>
-              <dt>Parser</dt>
-              <dd>MinerU+</dd>
+              <dt>解析</dt>
+              <dd>多格式</dd>
             </div>
           </dl>
         </aside>
@@ -39,28 +38,24 @@ function App() {
 
       <section className="workflowStrip" aria-label="工作流状态">
         <article>
-          <span>01</span>
+          <span>1</span>
           <div>
-            <strong>解析文件</strong>
-            <small>PDF、Office、表格、Markdown、HTML、图片</small>
+            <strong>上传</strong>
+            <small>多格式资料</small>
           </div>
         </article>
         <article>
-          <span>02</span>
+          <span>2</span>
           <div>
-            <strong>确认分块</strong>
-            <small>自动入库或人工检查 chunk 边界</small>
+            <strong>入库</strong>
+            <small>自动或手动分块</small>
           </div>
         </article>
         <article className="workflowStripResult">
-          <span>03</span>
+          <span>3</span>
           <div>
-            <strong>{lastIngest ? `${lastIngest.inserted} 个 chunk 已入库` : "等待入库"}</strong>
-            <small>
-              {lastIngest
-                ? `${lastIngest.documents} 个文档：${lastIngest.sources.join("，")}`
-                : "完成后可以直接在右侧提问。"}
-            </small>
+            <strong>{lastIngest ? `${lastIngest.inserted} 个分块` : "待查询"}</strong>
+            <small>{lastIngest ? `${lastIngest.documents} 个文档已入库` : "选择资料后开始"}</small>
           </div>
         </article>
       </section>

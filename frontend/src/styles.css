@@ -1,26 +1,22 @@
 :root {
-  color: #151a1f;
-  background:
-    linear-gradient(180deg, #f6f7f5 0%, #eef3f2 48%, #f8f6f1 100%),
-    #f6f7f5;
+  color: #182026;
+  background: #f5f7f7;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --ink: #151a1f;
-  --ink-soft: #38444d;
-  --muted: #6b7880;
-  --line: #dce3e1;
-  --line-strong: #c8d3d0;
-  --panel: rgb(255 255 255 / 88%);
-  --panel-solid: #ffffff;
-  --panel-soft: #f7f9f8;
+  --ink: #182026;
+  --ink-soft: #3a4650;
+  --muted: #74808a;
+  --line: #dde4e7;
+  --line-strong: #c7d2d8;
+  --panel: #ffffff;
+  --panel-soft: #f8fafb;
   --accent: #0f766e;
-  --accent-dark: #095f59;
-  --amber: #9a6a14;
-  --danger: #9c352c;
+  --accent-dark: #0b5e58;
+  --danger: #a43d32;
   --radius: 8px;
-  --shadow: 0 18px 48px rgb(26 36 42 / 9%);
+  --shadow: 0 18px 44px rgb(28 39 48 / 8%);
 }
 
 * {
@@ -40,14 +36,12 @@ textarea {
 
 button,
 input,
-textarea,
-label {
+textarea {
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    color 150ms ease;
 }
 
 button:focus-visible,
@@ -58,23 +52,23 @@ textarea:focus-visible {
 }
 
 .appShell {
-  width: min(1360px, calc(100vw - 36px));
+  width: min(1440px, calc(100vw - 40px));
   margin: 0 auto;
-  padding: 28px 0 56px;
+  padding: 24px 0 52px;
 }
 
 .masthead {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 14px;
   align-items: stretch;
 }
 
 .brandBlock,
 .runtimePanel,
 .workflowStrip,
-.panel,
-.summaryStrip {
+.summaryStrip,
+.panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -82,21 +76,20 @@ textarea:focus-visible {
 }
 
 .brandBlock {
-  display: grid;
-  align-content: end;
-  min-height: 176px;
-  padding: 28px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 118px;
+  padding: 22px 24px;
 }
 
 .eyebrow,
-.panelLabel,
 .summaryStrip span,
 .runtimeGrid dt {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -108,25 +101,17 @@ textarea:focus-visible {
 }
 
 .masthead h1 {
-  max-width: 780px;
   margin-top: 8px;
   color: var(--ink);
-  font-size: clamp(34px, 4.4vw, 58px);
-  line-height: 1.02;
-}
-
-.masthead p,
-.panel p {
-  margin: 10px 0 0;
-  color: var(--muted);
-  line-height: 1.55;
+  font-size: 34px;
+  line-height: 1.12;
 }
 
 .runtimePanel {
   display: grid;
-  align-content: space-between;
-  gap: 18px;
-  padding: 20px;
+  gap: 14px;
+  align-content: center;
+  padding: 18px;
 }
 
 .runtimeStatus {
@@ -134,13 +119,14 @@ textarea:focus-visible {
   align-items: center;
   gap: 9px;
   width: fit-content;
-  border: 1px solid #c9e0db;
+  border: 1px solid #cbe0dd;
   border-radius: 999px;
   padding: 7px 11px;
-  color: #15534e;
+  color: #135550;
   font-size: 13px;
   font-weight: 800;
-  background: #edf8f5;
+  background: #eef8f6;
+  white-space: nowrap;
 }
 
 .statusDot {
@@ -153,41 +139,44 @@ textarea:focus-visible {
 
 .runtimeGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 9px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   margin: 0;
 }
 
 .runtimeGrid div {
+  min-width: 0;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
+  border-radius: 7px;
+  padding: 10px 11px;
   background: var(--panel-soft);
 }
 
 .runtimeGrid dd {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
+  overflow: hidden;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflowStrip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0;
-  margin: 16px 0 18px;
+  margin: 14px 0;
   overflow: hidden;
-  box-shadow: 0 12px 34px rgb(26 36 42 / 7%);
+  box-shadow: 0 12px 28px rgb(28 39 48 / 5%);
 }
 
 .workflowStrip article {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
-  min-height: 86px;
-  padding: 16px;
+  min-height: 64px;
+  padding: 13px 15px;
   border-left: 1px solid var(--line);
 }
 
@@ -198,56 +187,57 @@ textarea:focus-visible {
 .workflowStrip article > span {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
-  color: var(--accent);
+  color: #145b55;
   font-size: 12px;
-  font-weight: 850;
-  background: #edf8f5;
+  font-weight: 900;
+  background: #edf7f5;
+}
+
+.workflowStrip strong,
+.workflowStrip small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflowStrip strong {
-  display: block;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .workflowStrip small {
-  display: -webkit-box;
-  overflow: hidden;
-  margin-top: 4px;
+  margin-top: 3px;
   color: var(--muted);
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  font-size: 12px;
 }
 
 .workflowStripResult {
-  background: #fffaf0;
+  background: #fffdf8;
 }
 
 .summaryStrip {
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
-  gap: 18px;
-  align-items: stretch;
-  margin-bottom: 18px;
-  padding: 13px 15px;
-  border-color: #cfe0d5;
-  background: #fbfefd;
-  box-shadow: 0 10px 24px rgb(21 32 40 / 5%);
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 24px rgb(28 39 48 / 5%);
 }
 
 .summaryStrip div {
   display: grid;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
 
 .summaryStrip strong {
-  min-width: 0;
   overflow: hidden;
-  color: #22313a;
+  color: var(--ink);
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -255,119 +245,179 @@ textarea:focus-visible {
 
 .workspaceGrid {
   display: grid;
-  grid-template-columns: minmax(380px, 460px) minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 440px minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
 }
 
 .panel {
-  padding: 22px;
+  min-width: 0;
+  padding: 18px;
 }
 
 .panelHeader {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .panel h2 {
-  margin-top: 4px;
   color: var(--ink);
-  font-size: 21px;
+  font-size: 20px;
+  line-height: 1.2;
 }
 
 .panelBadge {
   flex: 0 0 auto;
-  align-self: flex-start;
-  border: 1px solid #c9e0db;
+  max-width: 180px;
+  overflow: hidden;
+  border: 1px solid #cbe0dd;
   border-radius: 999px;
   padding: 6px 10px;
-  color: #15534e;
+  color: #155550;
   font-size: 12px;
   font-weight: 850;
-  background: #edf8f5;
+  background: #eef8f6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 14px;
+  color: #ffffff;
+  font-weight: 800;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.secondaryButton,
+.promptButton,
+.iconButton {
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  background: #f6f8f9;
+}
+
+.secondaryButton:hover:not(:disabled),
+.promptButton:hover:not(:disabled),
+.iconButton:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  background: #edf2f3;
+}
+
+.iconButton {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+input,
+textarea {
+  border: 1px solid #cdd8dc;
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #ffffff;
+}
+
+input:hover,
+textarea:hover {
+  border-color: #aabac1;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(15 118 110 / 10%);
 }
 
 .processRail {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 7px;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
 .processRail span {
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 7px 9px;
+  padding: 7px 8px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 800;
   text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: var(--panel-soft);
 }
 
 .processRail span.active,
 .processRail span.done {
-  border-color: #c9e0db;
-  color: #145a54;
-  background: #edf8f5;
-}
-
-.processRail span.done {
-  color: #246047;
+  border-color: #cbe0dd;
+  color: #145b55;
+  background: #eef8f6;
 }
 
 .segmentedControl {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 5px;
-  background: #f1f5f4;
+  background: var(--panel-soft);
 }
 
-.segmentedControl button,
-.promptButton,
-.secondaryButton,
-.iconButton {
+.segmentedControl button {
+  min-height: 34px;
   color: var(--ink-soft);
   background: transparent;
 }
 
-.segmentedControl button {
-  min-height: 36px;
-}
-
-.segmentedControl button:hover:not(:disabled),
-.segmentedControl button.active {
+.segmentedControl button.active,
+.segmentedControl button:hover:not(:disabled) {
   color: var(--ink);
-  background: var(--panel-solid);
-  box-shadow: 0 8px 20px rgb(26 36 42 / 8%);
-  transform: none;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgb(28 39 48 / 7%);
 }
 
 .dropZone {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 14px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
-  min-height: 150px;
-  padding: 18px;
-  border: 1px dashed #8fb7b1;
+  min-height: 118px;
+  border: 1px dashed #9bbab7;
   border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, rgb(237 248 245 / 82%) 0%, rgb(255 255 255 / 84%) 52%),
-    var(--panel-soft);
+  padding: 16px;
+  background: #fbfdfd;
   cursor: pointer;
 }
 
 .dropZone:hover {
   border-color: var(--accent);
-  box-shadow: 0 14px 30px rgb(15 118 110 / 10%);
+  box-shadow: 0 12px 24px rgb(15 118 110 / 8%);
 }
 
 .dropZone input {
@@ -379,44 +429,50 @@ textarea:focus-visible {
 .dropIcon {
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  border: 1px solid #c9e0db;
-  border-radius: var(--radius);
+  width: 42px;
+  height: 42px;
+  border: 1px solid #cbe0dd;
+  border-radius: 7px;
   color: var(--accent);
-  font-size: 26px;
-  font-weight: 450;
-  background: #ffffff;
+  font-size: 24px;
+  background: #eef8f6;
 }
 
 .dropCopy {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
+.dropCopy strong,
+.dropCopy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dropCopy strong {
-  color: #26343b;
+  color: var(--ink);
   font-size: 15px;
 }
 
 .dropCopy small {
   color: var(--muted);
-  line-height: 1.45;
+  font-size: 12px;
 }
 
 .dropAction {
-  border-radius: 6px;
-  padding: 9px 13px;
+  border-radius: 7px;
+  padding: 9px 12px;
   color: #ffffff;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 850;
   background: var(--accent);
-  box-shadow: 0 10px 22px rgb(15 118 110 / 18%);
+  white-space: nowrap;
 }
 
 .fileList {
-  margin-top: 14px;
+  margin-top: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -426,44 +482,46 @@ textarea:focus-visible {
 .fileListHeader,
 .fileRow,
 .actionBar,
-.contextMeta {
+.chunkSummary,
+.chunkCardHeader,
+.chunkActions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .fileListHeader {
-  padding: 11px 12px;
-  color: var(--ink);
-  background: #f5f8f7;
+  padding: 10px 12px;
+  background: var(--panel-soft);
 }
 
-.fileListHeader span {
+.fileListHeader span,
+.fileRow small,
+.modeHint,
+.chunkSummary span,
+.chunkCardHeader span {
   color: var(--muted);
   font-size: 12px;
 }
 
 .fileRow {
-  padding: 12px;
+  padding: 11px 12px;
   border-top: 1px solid var(--line);
 }
 
 .fileNameGroup {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
-.fileNameGroup span,
-.contextMeta span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.fileRow small,
-.contextMeta small {
-  color: var(--muted);
+.fileNameGroup span {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -478,109 +536,152 @@ textarea:focus-visible {
   gap: 8px;
 }
 
-button {
-  min-height: 40px;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 16px;
-  color: #ffffff;
-  font-weight: 800;
-  background: var(--accent);
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  background: var(--accent-dark);
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.iconButton,
-.secondaryButton,
-.promptButton {
-  border: 1px solid var(--line);
-  background: #f3f6f5;
-}
-
-.iconButton {
-  min-height: 30px;
-  padding: 0 10px;
-}
-
-.secondaryButton {
-  min-height: 34px;
-}
-
-.iconButton:hover:not(:disabled),
-.secondaryButton:hover:not(:disabled),
-.promptButton:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  color: var(--ink);
-  background: #e8efed;
-}
-
-.fullWidth {
-  width: 100%;
-}
-
 .actionBar {
-  margin-top: 16px;
+  margin-top: 14px;
   border-top: 1px solid var(--line);
-  padding-top: 16px;
+  padding-top: 14px;
 }
 
 .modeHint {
-  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusText {
+  margin: 12px 0 0;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: #315560;
   font-size: 13px;
-  line-height: 1.45;
+  background: #eef6f7;
 }
 
-input,
-textarea {
-  border: 1px solid #cbd7dc;
-  border-radius: 6px;
-  padding: 9px 10px;
-  color: #172026;
-  background: #ffffff;
+.statusText.done {
+  color: #1f5d38;
+  background: #edf8f0;
 }
 
-input:hover,
-textarea:hover {
-  border-color: #9eb4bb;
+.statusText.error,
+.scopeMessage.error {
+  color: var(--danger);
+  background: #fff1ee;
 }
 
-input:focus,
-textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgb(15 118 110 / 10%);
+.manualChunkFlow {
+  display: grid;
+  gap: 12px;
 }
 
-.askComposer {
+.chunkConfigPanel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
+  gap: 9px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px;
+  background: var(--panel-soft);
+}
+
+.chunkConfigPanel label {
+  display: grid;
+  gap: 5px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.chunkConfigPanel input {
+  width: 100%;
+}
+
+.chunkEditor {
+  display: grid;
+  gap: 11px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
-  background: #f6f8f7;
+  background: #fbfcfd;
+}
+
+.chunkSummary strong,
+.chunkCardHeader strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.documentTabs {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.documentTabs button {
+  flex: 0 0 auto;
+  max-width: 210px;
+  min-height: 31px;
+  overflow: hidden;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #edf2f3;
+}
+
+.documentTabs button.active,
+.documentTabs button:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.chunkList {
+  display: grid;
+  gap: 10px;
+}
+
+.chunkCard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px;
+  background: #ffffff;
+}
+
+.chunkCardHeader {
+  margin-bottom: 8px;
+}
+
+.chunkCard textarea {
+  min-height: 128px;
+  border: 1px solid var(--line);
+  padding: 10px;
+  resize: vertical;
+  background: #fbfcfd;
+}
+
+.chunkActions {
+  margin-top: 9px;
+}
+
+.askComposer {
+  display: grid;
+  gap: 12px;
 }
 
 .documentScopePanel {
   display: grid;
   gap: 10px;
-  margin-bottom: 12px;
-  border: 1px solid #dce6e3;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
-  background: #ffffff;
+  background: var(--panel-soft);
 }
 
 .documentScopeHeader,
 .documentScopeActions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 }
 
 .documentScopeHeader {
@@ -588,12 +689,19 @@ textarea:focus {
 }
 
 .documentScopeHeader div:first-child {
-  display: grid;
-  gap: 3px;
+  min-width: 0;
+}
+
+.documentScopeHeader strong,
+.documentScopeHeader span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .documentScopeHeader strong {
-  color: #263640;
+  color: var(--ink);
   font-size: 14px;
 }
 
@@ -616,113 +724,108 @@ textarea:focus {
 
 .documentScopeList {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-  max-height: 168px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 7px;
+  max-height: 154px;
   overflow-y: auto;
-  padding-right: 2px;
 }
 
 .documentScopeItem {
   display: grid;
-  gap: 5px;
-  min-height: 58px;
-  border: 1px solid #dce6e3;
-  border-radius: 6px;
+  gap: 4px;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
   padding: 9px 10px;
-  color: #263841;
-  background: #f8faf9;
+  color: var(--ink-soft);
+  background: #ffffff;
   text-align: left;
 }
 
 .documentScopeItem:hover:not(:disabled) {
-  border-color: #8fb7b1;
-  color: #1f3a38;
-  background: #f1faf8;
-  transform: none;
+  border-color: #9bbab7;
+  color: var(--ink);
+  background: #f4faf8;
 }
 
 .documentScopeItem.active {
   border-color: var(--accent);
-  color: #123f3b;
-  background: #edf8f5;
+  color: #143f3b;
+  background: #eef8f6;
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.documentScopeName {
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+.documentScopeName,
 .documentScopeMeta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.scopeMessage {
-  margin: 0;
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #f6f8f7;
+.documentScopeName {
+  font-size: 13px;
+  font-weight: 850;
 }
 
-.scopeMessage.error {
-  color: var(--danger);
-  background: #fff0ed;
+.scopeMessage {
+  margin: 0;
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: #ffffff;
 }
 
 .questionBox {
-  border: 1px solid #cdd8d6;
+  border: 1px solid #cdd8dc;
   border-radius: var(--radius);
-  padding: 10px;
+  padding: 9px;
   background: #ffffff;
 }
 
 .questionBox:focus-within {
   border-color: #91b9b4;
-  box-shadow: 0 14px 30px rgb(21 32 40 / 7%);
+  box-shadow: 0 12px 24px rgb(28 39 48 / 6%);
 }
 
-textarea {
+.questionBox textarea {
   width: 100%;
-  min-height: 120px;
+  min-height: 110px;
   border: 0;
   resize: vertical;
   background: transparent;
 }
 
 textarea::placeholder {
-  color: #95a4aa;
+  color: #9ba8ae;
 }
 
-textarea:focus,
-textarea:hover {
+.questionBox textarea:focus,
+.questionBox textarea:hover {
   box-shadow: none;
 }
 
 .quickPromptRow {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .promptButton {
+  flex: 0 0 auto;
+  max-width: 260px;
   min-height: 32px;
+  overflow: hidden;
   padding: 0 11px;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .askToolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 10px;
 }
 
 .askToolbar label {
@@ -731,164 +834,36 @@ textarea:hover {
   gap: 8px;
   color: var(--muted);
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .askToolbar input {
-  width: 78px;
-}
-
-.statusText {
-  margin-top: 14px;
-  border-radius: 6px;
-  padding: 10px 12px;
-  color: #315360;
-  background: #eef6f7;
-}
-
-.statusText.done {
-  color: #1f5d38;
-  background: #edf8f0;
-}
-
-.statusText.error {
-  color: var(--danger);
-  background: #fff0ed;
-}
-
-.manualChunkFlow {
-  display: grid;
-  gap: 14px;
-}
-
-.chunkConfigPanel {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
-  gap: 10px;
-  align-items: end;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  background: var(--panel-soft);
-}
-
-.chunkConfigPanel label {
-  display: grid;
-  gap: 6px;
-  color: var(--ink-soft);
-  font-size: 13px;
-}
-
-.chunkConfigPanel input {
-  width: 100%;
-}
-
-.chunkEditor {
-  display: grid;
-  gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  background: #fbfcfb;
-}
-
-.chunkSummary,
-.chunkCardHeader,
-.chunkActions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.chunkSummary div {
-  display: grid;
-  gap: 3px;
-}
-
-.chunkSummary strong,
-.chunkCardHeader strong {
-  color: #263640;
-  font-size: 14px;
-}
-
-.chunkSummary span,
-.chunkCardHeader span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.documentTabs {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.documentTabs button {
-  flex: 0 0 auto;
-  max-width: 220px;
-  min-height: 32px;
-  overflow: hidden;
-  color: var(--ink-soft);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: #edf3f1;
-}
-
-.documentTabs button.active,
-.documentTabs button:hover:not(:disabled) {
-  color: #ffffff;
-  background: var(--accent);
-  transform: none;
-}
-
-.chunkList {
-  display: grid;
-  gap: 10px;
-}
-
-.chunkCard {
-  border: 1px solid #dce6e3;
-  border-radius: var(--radius);
-  padding: 12px;
-  background: #ffffff;
-}
-
-.chunkCardHeader {
-  margin-bottom: 8px;
-}
-
-.chunkCard textarea {
-  min-height: 132px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 10px;
-  background: #fbfcfd;
-}
-
-.chunkActions {
-  margin-top: 10px;
+  width: 72px;
 }
 
 .answerEmpty {
   display: grid;
-  gap: 6px;
-  margin-top: 16px;
-  border: 1px dashed #cbd6d4;
+  gap: 5px;
+  margin-top: 14px;
+  border: 1px dashed #cdd8dc;
   border-radius: var(--radius);
-  padding: 28px;
+  padding: 22px;
   color: var(--muted);
   text-align: center;
-  background: #fbfcfb;
+  background: #fbfcfd;
 }
 
 .answerEmpty strong {
   color: var(--ink);
-  font-size: 16px;
+  font-size: 15px;
+}
+
+.answerEmpty span {
+  font-size: 13px;
 }
 
 .resultBlock {
-  margin-top: 20px;
+  margin-top: 18px;
 }
 
 .sectionTitleRow {
@@ -896,7 +871,7 @@ textarea:hover {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 22px;
+  margin-top: 20px;
 }
 
 .sectionTitleRow:first-child {
@@ -904,34 +879,27 @@ textarea:hover {
 }
 
 .sectionTitleRow h3 {
-  margin: 0;
-  color: #263640;
+  color: var(--ink);
   font-size: 15px;
 }
 
 .sectionTitleRow span {
+  overflow: hidden;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .markdownBody {
   margin-top: 10px;
-  padding: 16px;
-  border-radius: var(--radius);
-  color: #20303a;
   overflow-x: auto;
-}
-
-.markdownBody.answer {
-  border: 1px solid #dfe7e5;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  color: #21313b;
   background: #ffffff;
-  box-shadow: 0 10px 24px rgb(21 32 40 / 5%);
-}
-
-.markdownBody.context {
-  margin-top: 12px;
-  padding: 0;
-  background: transparent;
+  box-shadow: 0 10px 24px rgb(28 39 48 / 5%);
 }
 
 .markdownBody > :first-child {
@@ -944,13 +912,13 @@ textarea:hover {
 
 .markdownBody p,
 .markdownBody li {
-  line-height: 1.68;
+  line-height: 1.7;
   white-space: pre-wrap;
 }
 
 .markdownBody pre {
   overflow-x: auto;
-  border-radius: 6px;
+  border-radius: 7px;
   padding: 12px;
   color: #eef2f3;
   background: #172026;
@@ -959,7 +927,7 @@ textarea:hover {
 .markdownBody code {
   border-radius: 4px;
   padding: 2px 4px;
-  background: #e2e9ed;
+  background: #e7edf0;
 }
 
 .markdownBody pre code {
@@ -975,61 +943,64 @@ textarea:hover {
 
 .markdownBody th,
 .markdownBody td {
-  border: 1px solid #c8d1d5;
+  border: 1px solid #cbd5da;
   padding: 8px;
   text-align: left;
   vertical-align: top;
 }
 
 .markdownBody th {
-  background: #e9eef1;
+  background: #eef2f4;
 }
 
 .contextExplorer {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) 1fr;
-  gap: 16px;
-  margin-top: 12px;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 10px;
   align-items: start;
 }
 
 .contextSources {
   display: grid;
-  gap: 8px;
+  gap: 7px;
+  max-height: 540px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .contextSourceButton {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   min-height: 0;
-  border: 1px solid #dce6e3;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 12px;
-  color: #263841;
+  padding: 11px;
+  color: var(--ink-soft);
   background: #ffffff;
   text-align: left;
 }
 
-.contextSourceButton:hover {
-  border-color: #8fb7b1;
-  background: #f5faf8;
+.contextSourceButton:hover:not(:disabled) {
+  border-color: #9bbab7;
+  background: #f6fbfa;
 }
 
 .contextSourceButton.active {
   border-color: var(--accent);
-  background: #f1faf8;
-  box-shadow:
-    inset 3px 0 0 var(--accent),
-    0 10px 24px rgb(15 118 110 / 10%);
+  color: #163f3b;
+  background: #eef8f6;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .contextSourceTop,
 .contextDetailHeader,
 .contextDetailHeader div {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
 .contextSourceTop {
@@ -1038,8 +1009,10 @@ textarea:hover {
 
 .contextSourceTop strong {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contextSourceTop small,
@@ -1048,6 +1021,18 @@ textarea:hover {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.contextSourceIndex {
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #255b56;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #eef8f6;
 }
 
 .contextPreview {
@@ -1060,68 +1045,86 @@ textarea:hover {
   -webkit-line-clamp: 2;
 }
 
-.contextSourceIndex {
-  width: fit-content;
-  max-width: 100%;
-  border-radius: 999px;
-  padding: 2px 7px;
-  color: #245b56;
-  font-size: 12px;
-  background: #edf8f5;
-  overflow-wrap: anywhere;
-}
-
 .contextDetail {
   min-width: 0;
-  border: 1px solid #dce6e3;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 15px;
+  padding: 14px;
   background: #ffffff;
-  box-shadow: 0 10px 24px rgb(21 32 40 / 5%);
+  box-shadow: 0 10px 24px rgb(28 39 48 / 5%);
 }
 
 .contextDetailHeader {
   justify-content: space-between;
   border-bottom: 1px solid var(--line);
   padding-bottom: 10px;
-  color: #253640;
+  color: var(--ink);
+}
+
+.contextDetailHeader strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plainContext {
+  max-height: 520px;
+  margin: 12px 0 0;
+  overflow: auto;
+  border-radius: 7px;
+  padding: 14px;
+  color: #22313a;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f7f9fa;
 }
 
 .emptyState {
   margin-top: 10px;
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 13px;
   color: var(--muted);
-  background: #f6f8f7;
+  background: var(--panel-soft);
 }
 
-@media (max-width: 1040px) {
+@media (max-width: 1120px) {
   .masthead,
   .workspaceGrid {
     grid-template-columns: 1fr;
+  }
+
+  .contextExplorer {
+    grid-template-columns: 1fr;
+  }
+
+  .contextSources {
+    max-height: 280px;
   }
 }
 
 @media (max-width: 760px) {
   .appShell {
-    width: min(100vw - 20px, 1360px);
-    padding-top: 14px;
+    width: min(100vw - 20px, 1440px);
+    padding-top: 12px;
   }
 
   .brandBlock,
-  .panel,
-  .runtimePanel {
-    padding: 18px;
+  .runtimePanel,
+  .panel {
+    padding: 16px;
   }
 
-  .brandBlock {
-    min-height: auto;
+  .masthead h1 {
+    font-size: 28px;
   }
 
-  .workflowStrip,
   .runtimeGrid,
+  .workflowStrip,
   .summaryStrip,
-  .contextExplorer,
   .chunkConfigPanel {
     grid-template-columns: 1fr;
   }
@@ -1140,9 +1143,11 @@ textarea:hover {
     justify-items: start;
   }
 
+  .fileRow,
   .actionBar,
   .askToolbar,
-  .fileRow {
+  .chunkSummary,
+  .chunkActions {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1159,6 +1164,6 @@ textarea:hover {
   }
 
   .panelHeader {
-    flex-direction: column;
+    align-items: flex-start;
   }
 }

@@ -338,11 +338,9 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
     <section className="panel ingestionPanel">
       <div className="panelHeader">
         <div>
-          <span className="panelLabel">Ingestion pipeline</span>
           <h2>文档入库</h2>
-          <p>先选择文件，再决定自动入库或进入人工分块审核。</p>
         </div>
-        <span className="panelBadge">{chunkMode === "auto" ? "Auto Chunk" : "Manual Review"}</span>
+        <span className="panelBadge">{chunkMode === "auto" ? "自动分块" : "手动分块"}</span>
       </div>
 
       <div className="processRail" aria-label="入库流程">
@@ -384,9 +382,9 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
         </span>
         <span className="dropCopy">
           <strong>{files.length > 0 ? `${files.length} 个文件待处理` : "拖入或选择文档"}</strong>
-          <small>PDF / DOC / DOCX / PPT / PPTX / XLSX / HTML / MD / TXT / 图片</small>
+          <small>PDF、Office、表格、网页、文本、图片</small>
         </span>
-        <span className="dropAction">选择文件</span>
+        <span className="dropAction">选择</span>
       </label>
 
       {files.length > 0 && (
@@ -475,7 +473,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
             </p>
           )}
           <div className="actionBar">
-            <span className="modeHint">先解析预览，再手动编辑 chunk。</span>
+            <span className="modeHint">解析后编辑分块</span>
             <button
               disabled={!canStart || !chunkConfigValid}
               onClick={handleParseForManualChunks}
@@ -489,7 +487,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
             <div className="chunkEditor">
               <div className="chunkSummary">
                 <div>
-                  <strong>{manualChunkCount} 个 chunk</strong>
+                  <strong>{manualChunkCount} 个分块</strong>
                   <span>{manualDocuments.length} 个文档已解析</span>
                 </div>
                 <button disabled={busy} onClick={handleManualIngest} type="button">
@@ -516,7 +514,7 @@ export function FileUploadPanel({ onIngested }: FileUploadPanelProps) {
                   {selectedDocument.chunks.map((chunk, index) => (
                     <article className="chunkCard" key={chunk.id}>
                       <div className="chunkCardHeader">
-                        <strong>Chunk {index + 1}</strong>
+                        <strong>分块 {index + 1}</strong>
                         <span>{chunk.text.trim().length} 字符</span>
                       </div>
                       <textarea

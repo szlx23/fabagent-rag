@@ -21,15 +21,18 @@ const INTENT_LABELS: Record<AskResponse["intent"], string> = {
 
 type MarkdownBlockProps = {
   content: string;
-  variant?: "answer" | "context";
 };
 
-function MarkdownBlock({ content, variant = "answer" }: MarkdownBlockProps) {
+function MarkdownBlock({ content }: MarkdownBlockProps) {
   return (
-    <div className={`markdownBody ${variant}`}>
+    <div className="markdownBody answer">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
+}
+
+function PlainTextBlock({ content }: { content: string }) {
+  return <pre className="plainContext">{content}</pre>;
 }
 
 function getContextPreview(text: unknown) {
@@ -129,11 +132,9 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
     <section className="panel answerPanel">
       <div className="panelHeader">
         <div>
-          <span className="panelLabel">Retrieval console</span>
           <h2>检索问答</h2>
-          <p>问题、答案和召回来源在同一视图里核对。</p>
         </div>
-        <span className="panelBadge">Grounded QA</span>
+        <span className="panelBadge">{selectedLabel}</span>
       </div>
 
       <div className="askComposer">
@@ -151,7 +152,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
                   onClick={() => setSelectedSources([])}
                   type="button"
                 >
-                  清空选择
+                  清空
                 </button>
               )}
               <button
@@ -167,7 +168,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
 
           {documentError && <p className="scopeMessage error">{documentError}</p>}
           {!documentError && documents.length === 0 && (
-            <p className="scopeMessage">暂无已入库文件，完成入库后刷新列表。</p>
+            <p className="scopeMessage">暂无已入库文件</p>
           )}
           {documents.length > 0 && (
             <div className="documentScopeList" aria-label="已入库文件">
@@ -183,7 +184,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
                   >
                     <span className="documentScopeName">{document.source}</span>
                     <span className="documentScopeMeta">
-                      {document.chunk_count} chunks
+                      {document.chunk_count} 块
                       {document.file_ext ? ` · ${document.file_ext}` : ""}
                       {document.parser ? ` · ${document.parser}` : ""}
                     </span>
@@ -219,7 +220,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
 
         <div className="askToolbar">
           <label>
-            <span>Top K</span>
+            <span>召回</span>
             <input
               min={1}
               max={20}
@@ -229,7 +230,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
             />
           </label>
           <button disabled={loading} onClick={handleAsk} type="button">
-            {loading ? "查询中" : "发送问题"}
+            {loading ? "查询中" : "提问"}
           </button>
         </div>
       </div>
@@ -239,7 +240,7 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
       {!result && !error && (
         <div className="answerEmpty">
           <strong>等待提问</strong>
-          <span>入库后可以直接使用默认问题，也可以从上方快捷问题开始。</span>
+          <span>可直接使用默认问题</span>
         </div>
       )}
 
@@ -248,15 +249,14 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
           <div className="sectionTitleRow">
             <h3>回答</h3>
             <span>
-              {INTENT_LABELS[result.intent] ?? result.intent} · {result.contexts.length} 条召回 ·{" "}
-              {selectedLabel}
+              {INTENT_LABELS[result.intent] ?? result.intent} · {result.contexts.length} 条召回
             </span>
           </div>
-          <MarkdownBlock content={result.answer} variant="answer" />
+          <MarkdownBlock content={result.answer} />
 
           <div className="sectionTitleRow">
             <h3>引用来源</h3>
-            <span>点击来源查看原文片段</span>
+            <span>点击查看原文</span>
           </div>
           {result.contexts.length > 0 ? (
             <div className="contextExplorer">
@@ -296,10 +296,10 @@ export function AskPanel({ refreshKey = "" }: AskPanelProps) {
                       )}
                     </div>
                     {typeof selectedContext.score === "number" && (
-                      <small>score {selectedContext.score.toFixed(4)}</small>
+                      <small>分数 {selectedContext.score.toFixed(4)}</small>
                     )}
                   </div>
-                  <MarkdownBlock content={String(selectedContext.text ?? "")} variant="context" />
+                  <PlainTextBlock content={String(selectedContext.text ?? "")} />
                 </article>
               )}
             </div>
