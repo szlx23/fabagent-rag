@@ -10,7 +10,7 @@ if __package__ in {None, ""}:
 
 from fabagent_rag.config import load_settings
 from fabagent_rag.full_ingest import ingest_directory as ingest_directory_full_sync
-from fabagent_rag.evaluation import DEFAULT_EVAL_SET, run_evaluation
+from fabagent_rag.evaluation import DEFAULT_EVAL_SET, DEFAULT_INTERMEDIATE_DIR, run_evaluation
 from fabagent_rag.milvus_store import MilvusSchemaError
 from fabagent_rag.rag_service import answer_question, ingest_path
 
@@ -159,6 +159,13 @@ def ask(question: str, top_k: int) -> None:
 @click.option("--case-limit", type=int, help="只评测前 N 条问题，便于快速 smoke test。")
 @click.option("--source-limit", type=int, help="只评测前 N 个 source，便于快速 smoke test。")
 @click.option("--top-k", "top_k_override", type=int, help="覆盖评测集里的 top-k 设置。")
+@click.option(
+    "--intermediate-dir",
+    default=str(DEFAULT_INTERMEDIATE_DIR),
+    show_default=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="复用 parse/chunk 中间结果目录。",
+)
 def eval(
     eval_set: Path,
     stages: str,
@@ -166,6 +173,7 @@ def eval(
     case_limit: int | None,
     source_limit: int | None,
     top_k_override: int | None,
+    intermediate_dir: Path | None,
 ) -> None:
     """执行离线评测并生成报告。"""
 
@@ -180,8 +188,9 @@ def eval(
             case_limit=case_limit,
             source_limit=source_limit,
             top_k_override=top_k_override,
+            intermediate_dir=intermediate_dir if intermediate_dir else None,
         )
-    except MilvusSchemaError as exc:
+    except (MilvusSchemaError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"评测完成，报告目录：{report_dir}")
 

@@ -402,8 +402,8 @@ flowchart LR
 ```mermaid
 flowchart LR
     A[rag_eval_set.jsonl] --> B[引用 source]
-    B --> C[Parse]
-    C --> D[Chunk]
+    B --> C[Parse 或复用中间结果]
+    C --> D[Chunk 或复用中间结果]
     A --> E[Retrieval]
     A --> F[Answer]
     C --> G[parse_rows / parse summary]
@@ -416,9 +416,13 @@ flowchart LR
     J --> K
 ```
 
+默认会复用 `data/eval/parse_chunk_full_local/` 下的 parse/chunk 中间结果；
+评测集里引用当前不支持或本地不存在的 source 时，会自动跳过对应 case，并在
+`manifest.json` 里记录 `skipped_case_count` 和 `skipped_sources`。
+
 测试数据覆盖：
 
-- 文件类型：MD、DOC、DOCX、PPT、PPTX、PDF、XLSX
+- 文件类型：MD、DOCX、PPTX、PDF、XLSX、HTML/TXT
 - 问题类型：概念解释、英文缩写、操作步骤、SOP、故障处理、参数查询、表格问答、总结题、无答案问题、闲聊分流
 - 业务内容：OPC、FEOL/BEOL、洁净室制度、刻蚀报警、MES Hold Lot、recipe 参数、SPC 报表、设备点检、ICP-RIE / HF / PECVD 操作、光刻培训、芯片工艺流程
 - 评测依据：每条样例绑定 `expected_sources` 和 `expected_answer_contains`，避免构造没有来源支撑的问题
@@ -441,7 +445,7 @@ flowchart LR
 | `retrieval` | `*_mrr` | 第一条命中 `expected_sources` 的排名倒数，未命中为 0，再取均值 |
 | `retrieval` | `planner_improvement_rate` | planned hybrid MRR 高于 original query MRR 的题数 / 有效题数 |
 | `answer` | `pass_rate` | 按题型规则通过的题数 / 有效题数 |
-| `answer` | `source_hit_rate` | 回答使用的 contexts 命中 `expected_sources` 的题数 / 有效题数 |
+| `answer` | `source_hit_rate` | 有 `expected_sources` 的检索题中，回答 contexts 命中任一目标 source 的题数 / 对应有效题数 |
 | `answer` | `avg_keyword_hit_ratio` | 答案命中 `expected_answer_contains` 的比例均值 |
 | `answer` | `no_answer_pass_rate` | 无答案题中回答包含“资料不足”等提示的比例 |
 | `answer` | `chat_pass_rate` | 闲聊题中不返回 contexts 且回答符合预期的比例 |

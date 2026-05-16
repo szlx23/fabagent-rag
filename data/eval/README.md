@@ -77,6 +77,10 @@ rag ask "OPC有哪些类型？" --top-k 5
 - `retrieval`：intent、query plan、vector / keyword / hybrid 召回效果
 - `answer`：端到端回答是否命中来源、是否符合无答案/闲聊控制流
 
+默认会复用 `data/eval/parse_chunk_full_local/` 下已有的 parse/chunk 中间结果；
+评测集里引用了当前不支持或本地不存在的 source 时，会自动跳过对应 case，不再把
+已取消支持的旧格式纳入指标。
+
 一键执行：
 
 ```bash
@@ -89,6 +93,7 @@ rag ask "OPC有哪些类型？" --top-k 5
 ./scripts/eval.sh --case-limit 10
 ./scripts/eval.sh --stages parse,chunk
 ./scripts/eval.sh --top-k 5
+./scripts/eval.sh --intermediate-dir data/eval/parse_chunk_full_local
 ```
 
 也可以直接使用 CLI：

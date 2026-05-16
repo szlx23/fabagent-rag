@@ -30,6 +30,7 @@ class FileEstimate:
     file_name: str
     file_ext: str
     file_size_bytes: int
+    excluded_by_prefix: bool
     status: str
     parser: str = ""
     parsed_chars: int = 0
@@ -115,6 +116,12 @@ def discover_files(input_dir: Path) -> list[Path]:
             continue
         files.append(path)
     return files
+
+
+def is_excluded(path: Path) -> bool:
+    """保留历史报告字段；当前 dry-run 只扫描支持类型，不再按文件名前缀排除。"""
+
+    return False
 
 
 def process_file(

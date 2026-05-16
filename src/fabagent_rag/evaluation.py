@@ -3,14 +3,17 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from hashlib import sha1
 from pathlib import Path
 from time import perf_counter
 import json
+import re
 import statistics
 
+from fabagent_rag.chunking import Chunk
 from fabagent_rag.chunking import split_text
 from fabagent_rag.config import Settings
-from fabagent_rag.documents import ParsedDocument, parse_document
+from fabagent_rag.documents import ParsedDocument, SUPPORTED_EXTENSIONS, parse_document
 from fabagent_rag.intent import detect_intent
 from fabagent_rag.llm import classify_intent_with_llm
 from fabagent_rag.query_planner import QueryPlan, build_query_plan
@@ -32,6 +35,7 @@ from fabagent_rag.rag_service import (
 
 DEFAULT_EVAL_SET = Path("data/eval/rag_eval_set.jsonl")
 DEFAULT_REPORT_ROOT = Path("data/eval/reports")
+DEFAULT_INTERMEDIATE_DIR = Path("data/eval/parse_chunk_full_local")
 ALLOWED_STAGES = ("parse", "chunk", "retrieval", "answer")
 NO_ANSWER_HINTS = (
     "资料不足",
@@ -120,6 +124,13 @@ class AnswerEvalRow:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class EvalCaseSelection:
+    cases: list[EvalCase]
+    skipped_cases: list[EvalCase]
+    skipped_sources: list[str]
+
+
 def run_evaluation(
     settings: Settings,
     eval_set_path: Path = DEFAULT_EVAL_SET,
@@ -128,6 +139,7 @@ def run_evaluation(
     case_limit: int | None = None,
     source_limit: int | None = None,
     top_k_override: int | None = None,
+    intermediate_dir: Path | None = DEFAULT_INTERMEDIATE_DIR,
 ) -> Path:
     """执行离线评测，并把结果写入一个新的报告目录。
 
@@ -138,11 +150,13 @@ def run_evaluation(
     4. `answer`：用端到端问答结果做 groundedness 和控制流检查。
     """
 
-    cases = load_eval_cases(eval_set_path)
+    raw_cases = load_eval_cases(eval_set_path)
     if case_limit is not None:
-        cases = cases[:case_limit]
+        raw_cases = raw_cases[:case_limit]
     validate_stages(stages)
 
+    selection = select_supported_cases(raw_cases)
+    cases = selection.cases
     report_dir = output_dir or default_report_dir(DEFAULT_REPORT_ROOT)
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -155,30 +169,53 @@ def run_evaluation(
     manifest = {
         "eval_set_path": str(eval_set_path),
         "case_count": len(cases),
+        "raw_case_count": len(raw_cases),
+        "skipped_case_count": len(selection.skipped_cases),
         "source_count": len(sources),
+        "skipped_sources": selection.skipped_sources,
         "stages": list(stages),
+        "intermediate_dir": str(intermediate_dir) if intermediate_dir else "",
+        "settings": build_settings_manifest(settings, top_k_override, source_limit),
         "created_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
     }
 
     if "parse" in stages:
-        parse_rows, parse_summary, parsed_docs = run_parse_eval(settings, sources)
-        write_stage_rows(report_dir / "parse_rows.json", parse_rows)
+        parse_rows, parse_summary, parsed_docs = run_parse_eval(
+            settings,
+            sources,
+            intermediate_dir=intermediate_dir,
+        )
+        write_stage_rows(report_dir / "parse_rows.jsonl", parse_rows)
         summaries["parse"] = parse_summary
 
     if "chunk" in stages:
-        if not parsed_docs:
-            parsed_docs = parse_sources(settings, sources)
-        chunk_rows, chunk_summary = run_chunk_eval(settings, parsed_docs)
-        write_stage_rows(report_dir / "chunk_rows.json", chunk_rows)
+        cached_chunk_rows = load_intermediate_chunk_rows(
+            sources,
+            intermediate_dir,
+            settings.min_chunk_size,
+        )
+        if cached_chunk_rows:
+            chunk_rows, chunk_summary = summarize_chunk_rows(settings, cached_chunk_rows)
+        else:
+            if not parsed_docs:
+                _, _, parsed_docs = run_parse_eval(
+                    settings,
+                    sources,
+                    intermediate_dir=intermediate_dir,
+                )
+            chunk_rows, chunk_summary = run_chunk_eval(settings, parsed_docs)
+        write_stage_rows(report_dir / "chunk_rows.jsonl", chunk_rows)
         summaries["chunk"] = chunk_summary
 
     if "retrieval" in stages:
+        preflight_summary = run_retrieval_preflight(settings, cases)
+        summaries["retrieval_preflight"] = preflight_summary
         retrieval_rows, retrieval_summary = run_retrieval_eval(
             settings,
             cases,
             top_k_override=top_k_override,
         )
-        write_stage_rows(report_dir / "retrieval_rows.json", retrieval_rows)
+        write_stage_rows(report_dir / "retrieval_rows.jsonl", retrieval_rows)
         summaries["retrieval"] = retrieval_summary
 
     if "answer" in stages:
@@ -187,7 +224,7 @@ def run_evaluation(
             cases,
             top_k_override=top_k_override,
         )
-        write_stage_rows(report_dir / "answer_rows.json", answer_rows)
+        write_stage_rows(report_dir / "answer_rows.jsonl", answer_rows)
         summaries["answer"] = answer_summary
 
     (report_dir / "manifest.json").write_text(
@@ -238,6 +275,36 @@ def referenced_sources(cases: list[EvalCase]) -> list[Path]:
     return [Path(source) for source in unique]
 
 
+def select_supported_cases(cases: list[EvalCase]) -> EvalCaseSelection:
+    """过滤当前系统已经不支持或本地不存在的评测 source。"""
+
+    skipped_cases: list[EvalCase] = []
+    skipped_sources = set()
+    selected: list[EvalCase] = []
+    for case in cases:
+        invalid_sources = [
+            source
+            for source in case.expected_sources
+            if not is_supported_existing_source(Path(source))
+        ]
+        if invalid_sources:
+            skipped_cases.append(case)
+            skipped_sources.update(invalid_sources)
+            continue
+        selected.append(case)
+    return EvalCaseSelection(
+        cases=selected,
+        skipped_cases=skipped_cases,
+        skipped_sources=sorted(skipped_sources),
+    )
+
+
+def is_supported_existing_source(source: Path) -> bool:
+    if not source.exists():
+        return False
+    return source.suffix.lower() in SUPPORTED_EXTENSIONS
+
+
 def parse_sources(settings: Settings, sources: list[Path]) -> dict[str, ParsedDocument]:
     """在多个阶段之间复用解析结果，避免反复跑 MinerU/Docling。"""
 
@@ -254,11 +321,27 @@ def parse_sources(settings: Settings, sources: list[Path]) -> dict[str, ParsedDo
 def run_parse_eval(
     settings: Settings,
     sources: list[Path],
+    intermediate_dir: Path | None = DEFAULT_INTERMEDIATE_DIR,
 ) -> tuple[list[ParseEvalRow], dict[str, object], dict[str, ParsedDocument]]:
     rows: list[ParseEvalRow] = []
     parsed_docs: dict[str, ParsedDocument] = {}
+    cached = load_intermediate_parsed_docs(sources, intermediate_dir)
 
     for source in sources:
+        cached_document = cached.get(str(source))
+        if cached_document:
+            parsed_docs[str(source)] = cached_document
+            rows.append(
+                ParseEvalRow(
+                    source=str(source),
+                    status="ok",
+                    parser=cached_document.metadata.get("parser", ""),
+                    chars=len(cached_document.text),
+                    duration_ms=0,
+                )
+            )
+            continue
+
         started = perf_counter()
         try:
             document = parse_document(source, str(source), mineru_backend=settings.mineru_backend)
@@ -295,6 +378,7 @@ def run_parse_eval(
         "avg_chars": safe_mean(row.chars for row in ok_rows),
         "avg_duration_ms": safe_mean(row.duration_ms for row in ok_rows),
         "parser_counts": dict(Counter(row.parser for row in ok_rows)),
+        "cache_hit_count": sum(1 for row in ok_rows if row.duration_ms == 0),
     }
     return rows, summary, parsed_docs
 
@@ -339,6 +423,23 @@ def run_chunk_eval(
         "avg_table_chunk_ratio": safe_mean(row.table_chunk_ratio for row in rows),
         "avg_short_chunk_ratio": safe_mean(row.short_chunk_ratio for row in rows),
         "config": asdict(config),
+    }
+    return rows, summary
+
+
+def summarize_chunk_rows(
+    settings: Settings,
+    rows: list[ChunkEvalRow],
+) -> tuple[list[ChunkEvalRow], dict[str, object]]:
+    summary = {
+        "source_count": len(rows),
+        "avg_chunk_count": safe_mean(row.chunk_count for row in rows),
+        "avg_chunk_chars": safe_mean(row.avg_chunk_chars for row in rows),
+        "avg_section_title_coverage": safe_mean(row.section_title_coverage for row in rows),
+        "avg_table_chunk_ratio": safe_mean(row.table_chunk_ratio for row in rows),
+        "avg_short_chunk_ratio": safe_mean(row.short_chunk_ratio for row in rows),
+        "config": asdict(build_chunk_config(settings)),
+        "cache_hit_count": len(rows),
     }
     return rows, summary
 
@@ -527,6 +628,16 @@ def run_answer_eval(
             )
 
     ok_rows = [row for row in rows if not row.error]
+    cases_by_id = {case.case_id: case for case in cases}
+    source_rows = [
+        row
+        for row in ok_rows
+        if cases_by_id.get(row.case_id)
+        and cases_by_id[row.case_id].should_retrieve
+        and cases_by_id[row.case_id].expected_sources
+    ]
+    no_answer_cases = [case for case in cases if case.should_retrieve and not case.expected_sources]
+    chat_cases = [case for case in cases if case.intent == "chat"]
     summary = {
         "case_count": len(rows),
         "error_count": len(rows) - len(ok_rows),
@@ -535,27 +646,35 @@ def run_answer_eval(
             sum(1 for row in ok_rows if row.actual_intent == row.expected_intent),
             len(ok_rows),
         ),
-        "source_hit_rate": ratio(sum(1 for row in ok_rows if row.source_hit), len(ok_rows)),
+        "source_hit_rate": ratio(sum(1 for row in source_rows if row.source_hit), len(source_rows)),
         "avg_keyword_hit_ratio": safe_mean(row.keyword_hit_ratio for row in ok_rows),
         "no_answer_pass_rate": ratio(
-            sum(
-                1
-                for row in ok_rows
-                if next(case for case in cases if case.case_id == row.case_id).should_retrieve
-                and not next(case for case in cases if case.case_id == row.case_id).expected_sources
-                and row.no_answer_ok
-            ),
-            sum(
-                1 for case in cases if case.should_retrieve and not case.expected_sources
-            ),
+            sum(1 for row in ok_rows if cases_by_id[row.case_id] in no_answer_cases and row.no_answer_ok),
+            len(no_answer_cases),
         ),
         "chat_pass_rate": ratio(
             sum(1 for row in ok_rows if row.expected_intent == "chat" and row.chat_ok),
-            sum(1 for case in cases if case.intent == "chat"),
+            len(chat_cases),
         ),
         "generation_mode": generation_mode,
     }
     return rows, summary
+
+
+def run_retrieval_preflight(settings: Settings, cases: list[EvalCase]) -> dict[str, object]:
+    expected_sources = sorted({source for case in cases for source in case.expected_sources})
+    if not expected_sources:
+        return {"expected_source_count": 0, "indexed_source_count": 0, "missing_sources": []}
+
+    keyword_store = build_keyword_store(settings)
+    indexed_sources = {str(row.get("source") or "") for row in keyword_store.list_documents()}
+    missing_sources = [source for source in expected_sources if source not in indexed_sources]
+    return {
+        "expected_source_count": len(expected_sources),
+        "indexed_source_count": len(expected_sources) - len(missing_sources),
+        "missing_source_count": len(missing_sources),
+        "missing_sources": missing_sources,
+    }
 
 
 def search_contexts_for_eval(
@@ -681,7 +800,7 @@ def write_stage_rows(path: Path, rows: list[object]) -> None:
     """统一写 JSON 行，便于后续脚本分析。"""
 
     path.write_text(
-        "\n".join(json.dumps(asdict(row), ensure_ascii=False) for row in rows),
+        "\n".join(json.dumps(asdict(row), ensure_ascii=False) for row in rows) + ("\n" if rows else ""),
         encoding="utf-8",
     )
 
@@ -696,8 +815,10 @@ def build_report_markdown(manifest: dict[str, object], summaries: dict[str, dict
         "",
         f"- Eval set: `{manifest['eval_set_path']}`",
         f"- Cases: `{manifest['case_count']}`",
+        f"- Skipped cases: `{manifest.get('skipped_case_count', 0)}`",
         f"- Sources: `{manifest['source_count']}`",
         f"- Stages: `{', '.join(manifest['stages'])}`",
+        f"- Intermediate dir: `{manifest.get('intermediate_dir') or 'disabled'}`",
         f"- Created at: `{manifest['created_at']}`",
     ]
 
@@ -714,10 +835,10 @@ def build_report_markdown(manifest: dict[str, object], summaries: dict[str, dict
         )
 
     stage_files = {
-        "parse": "`parse_rows.json`: 解析逐文件结果",
-        "chunk": "`chunk_rows.json`: 切块逐文件结果",
-        "retrieval": "`retrieval_rows.json`: 检索逐题结果",
-        "answer": "`answer_rows.json`: 问答逐题结果",
+        "parse": "`parse_rows.jsonl`: 解析逐文件结果",
+        "chunk": "`chunk_rows.jsonl`: 切块逐文件结果",
+        "retrieval": "`retrieval_rows.jsonl`: 检索逐题结果",
+        "answer": "`answer_rows.jsonl`: 问答逐题结果",
     }
     lines.extend(["", "## Files", "", "- `summary.json`: 汇总指标"])
     for stage_name in manifest["stages"]:
@@ -728,7 +849,7 @@ def build_report_markdown(manifest: dict[str, object], summaries: dict[str, dict
 
 
 def default_report_dir(root: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     return root / timestamp
 
 
@@ -762,3 +883,123 @@ def validate_stages(stages: tuple[str, ...]) -> None:
         invalid_names = ", ".join(invalid)
         allowed_names = ", ".join(ALLOWED_STAGES)
         raise ValueError(f"未知评测阶段：{invalid_names}。可选值：{allowed_names}")
+
+
+def load_intermediate_parsed_docs(
+    sources: list[Path],
+    intermediate_dir: Path | None,
+) -> dict[str, ParsedDocument]:
+    if not intermediate_dir or not intermediate_dir.exists():
+        return {}
+
+    file_rows = load_intermediate_file_rows(intermediate_dir)
+    parsed_docs: dict[str, ParsedDocument] = {}
+    for source in sources:
+        row = file_rows.get(str(source))
+        parsed_path = intermediate_dir / "parsed" / f"{safe_file_stem(source)}.md"
+        if not row or row.get("status") != "ok" or not parsed_path.exists():
+            continue
+        parsed_docs[str(source)] = ParsedDocument(
+            source=str(source),
+            text=parsed_path.read_text(encoding="utf-8"),
+            metadata={
+                "parser": str(row.get("parser") or ""),
+                "file_ext": source.suffix.lower(),
+            },
+        )
+    return parsed_docs
+
+
+def load_intermediate_chunk_rows(
+    sources: list[Path],
+    intermediate_dir: Path | None,
+    min_chunk_size: int,
+) -> list[ChunkEvalRow]:
+    if not intermediate_dir or not intermediate_dir.exists():
+        return []
+
+    file_rows = load_intermediate_file_rows(intermediate_dir)
+    rows: list[ChunkEvalRow] = []
+    for source in sources:
+        row = file_rows.get(str(source))
+        chunk_path = intermediate_dir / "chunks" / f"{safe_file_stem(source)}.jsonl"
+        if not row or row.get("status") != "ok" or not chunk_path.exists():
+            continue
+
+        chunks = load_chunk_jsonl(chunk_path)
+        chunk_lengths = [len(chunk.text) for chunk in chunks]
+        section_covered = sum(1 for chunk in chunks if chunk.section_title.strip())
+        table_chunks = sum(1 for chunk in chunks if chunk.content_type == "table")
+        rows.append(
+            ChunkEvalRow(
+                source=str(source),
+                chunk_count=len(chunks),
+                avg_chunk_chars=int(safe_mean(chunk_lengths)),
+                min_chunk_chars=min(chunk_lengths) if chunk_lengths else 0,
+                max_chunk_chars=max(chunk_lengths) if chunk_lengths else 0,
+                section_title_coverage=ratio(section_covered, len(chunks)),
+                table_chunk_ratio=ratio(table_chunks, len(chunks)),
+                short_chunk_ratio=ratio(
+                    sum(1 for length in chunk_lengths if min_chunk_size and length < min_chunk_size),
+                    len(chunks),
+                ),
+            )
+        )
+    return rows if len(rows) == len(sources) else []
+
+
+def load_intermediate_file_rows(intermediate_dir: Path) -> dict[str, dict[str, object]]:
+    summary_path = intermediate_dir / "summary.json"
+    if summary_path.exists():
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        return {str(row.get("source")): row for row in payload.get("files", [])}
+    return {}
+
+
+def load_chunk_jsonl(path: Path) -> list[Chunk]:
+    chunks: list[Chunk] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        chunks.append(
+            Chunk(
+                text=str(payload.get("text") or ""),
+                source=str(payload.get("source") or ""),
+                index=int(payload.get("index") or 0),
+                page=payload.get("page") if isinstance(payload.get("page"), int) else None,
+                section_title=str(payload.get("section_title") or ""),
+                file_ext=str(payload.get("file_ext") or ""),
+                content_type=str(payload.get("content_type") or "text"),
+                sheet_name=str(payload.get("sheet_name") or ""),
+                parser=str(payload.get("parser") or ""),
+                chunk_id=str(payload.get("chunk_id") or ""),
+                ingested_at=str(payload.get("ingested_at") or ""),
+            )
+        )
+    return chunks
+
+
+def safe_file_stem(path: Path) -> str:
+    readable = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("._-") or "document"
+    digest = sha1(path.name.encode("utf-8")).hexdigest()[:10]
+    return f"{readable}_{digest}"
+
+
+def build_settings_manifest(
+    settings: Settings,
+    top_k_override: int | None,
+    source_limit: int | None,
+) -> dict[str, object]:
+    return {
+        "milvus_collection": settings.milvus_collection,
+        "embedding_model": settings.embedding_model,
+        "inference_model": settings.inference_model,
+        "keyword_index_path": settings.keyword_index_path,
+        "chunk_size": settings.chunk_size,
+        "chunk_overlap": settings.chunk_overlap,
+        "min_chunk_size": settings.min_chunk_size,
+        "mineru_backend": settings.mineru_backend,
+        "top_k_override": top_k_override,
+        "source_limit": source_limit,
+    }
