@@ -180,7 +180,7 @@ def eval(
     stage_names = tuple(stage.strip() for stage in stages.split(",") if stage.strip())
     settings = load_settings()
     try:
-        report_dir = run_evaluation(
+        run_evaluation(
             settings,
             eval_set_path=eval_set,
             stages=stage_names,
@@ -189,10 +189,10 @@ def eval(
             source_limit=source_limit,
             top_k_override=top_k_override,
             intermediate_dir=intermediate_dir if intermediate_dir else None,
+            progress_callback=click.echo,
         )
     except (MilvusSchemaError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"评测完成，报告目录：{report_dir}")
 
 
 if __name__ == "__main__":

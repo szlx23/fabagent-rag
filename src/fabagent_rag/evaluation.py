@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from hashlib import sha1
 from pathlib import Path
 from time import perf_counter
+from typing import Callable
 import json
 import re
 import statistics
@@ -47,6 +48,7 @@ NO_ANSWER_HINTS = (
 )
 CHAT_HINTS = ("FabAgent", "RAG")
 RETRIEVAL_MODES = ("vector", "keyword", "hybrid")
+ProgressCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -140,6 +142,7 @@ def run_evaluation(
     source_limit: int | None = None,
     top_k_override: int | None = None,
     intermediate_dir: Path | None = DEFAULT_INTERMEDIATE_DIR,
+    progress_callback: ProgressCallback | None = None,
 ) -> Path:
     """执行离线评测，并把结果写入一个新的报告目录。
 
@@ -157,6 +160,10 @@ def run_evaluation(
 
     selection = select_supported_cases(raw_cases)
     cases = selection.cases
+    report_progress(
+        progress_callback,
+        f"准备评测：原始 {len(raw_cases)} 题，执行 {len(cases)} 题，跳过 {len(selection.skipped_cases)} 题",
+    )
     report_dir = output_dir or default_report_dir(DEFAULT_REPORT_ROOT)
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -180,15 +187,19 @@ def run_evaluation(
     }
 
     if "parse" in stages:
+        report_progress(progress_callback, f"[parse] 开始，source={len(sources)}")
         parse_rows, parse_summary, parsed_docs = run_parse_eval(
             settings,
             sources,
             intermediate_dir=intermediate_dir,
+            progress_callback=progress_callback,
         )
         write_stage_rows(report_dir / "parse_rows.jsonl", parse_rows)
         summaries["parse"] = parse_summary
+        report_progress(progress_callback, f"[parse] 完成，成功={parse_summary['success_count']}")
 
     if "chunk" in stages:
+        report_progress(progress_callback, f"[chunk] 开始，source={len(sources)}")
         cached_chunk_rows = load_intermediate_chunk_rows(
             sources,
             intermediate_dir,
@@ -202,30 +213,42 @@ def run_evaluation(
                     settings,
                     sources,
                     intermediate_dir=intermediate_dir,
+                    progress_callback=progress_callback,
                 )
             chunk_rows, chunk_summary = run_chunk_eval(settings, parsed_docs)
         write_stage_rows(report_dir / "chunk_rows.jsonl", chunk_rows)
         summaries["chunk"] = chunk_summary
+        report_progress(progress_callback, f"[chunk] 完成，source={chunk_summary['source_count']}")
 
     if "retrieval" in stages:
+        report_progress(progress_callback, "[retrieval] 检查 expected source 是否已入库")
         preflight_summary = run_retrieval_preflight(settings, cases)
         summaries["retrieval_preflight"] = preflight_summary
+        report_progress(
+            progress_callback,
+            f"[retrieval] 开始，缺失 source={preflight_summary.get('missing_source_count', 0)}",
+        )
         retrieval_rows, retrieval_summary = run_retrieval_eval(
             settings,
             cases,
             top_k_override=top_k_override,
+            progress_callback=progress_callback,
         )
         write_stage_rows(report_dir / "retrieval_rows.jsonl", retrieval_rows)
         summaries["retrieval"] = retrieval_summary
+        report_progress(progress_callback, f"[retrieval] 完成，case={retrieval_summary['case_count']}")
 
     if "answer" in stages:
+        report_progress(progress_callback, f"[answer] 开始，case={len(cases)}")
         answer_rows, answer_summary = run_answer_eval(
             settings,
             cases,
             top_k_override=top_k_override,
+            progress_callback=progress_callback,
         )
         write_stage_rows(report_dir / "answer_rows.jsonl", answer_rows)
         summaries["answer"] = answer_summary
+        report_progress(progress_callback, f"[answer] 完成，通过率={answer_summary['pass_rate']}")
 
     (report_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -239,6 +262,7 @@ def run_evaluation(
         build_report_markdown(manifest, summaries),
         encoding="utf-8",
     )
+    report_progress(progress_callback, f"评测完成，报告目录：{report_dir}")
     return report_dir
 
 
@@ -322,14 +346,16 @@ def run_parse_eval(
     settings: Settings,
     sources: list[Path],
     intermediate_dir: Path | None = DEFAULT_INTERMEDIATE_DIR,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[list[ParseEvalRow], dict[str, object], dict[str, ParsedDocument]]:
     rows: list[ParseEvalRow] = []
     parsed_docs: dict[str, ParsedDocument] = {}
     cached = load_intermediate_parsed_docs(sources, intermediate_dir)
 
-    for source in sources:
+    for index, source in enumerate(sources, start=1):
         cached_document = cached.get(str(source))
         if cached_document:
+            report_progress(progress_callback, f"[parse] {index}/{len(sources)} cache {source.name}")
             parsed_docs[str(source)] = cached_document
             rows.append(
                 ParseEvalRow(
@@ -343,6 +369,7 @@ def run_parse_eval(
             continue
 
         started = perf_counter()
+        report_progress(progress_callback, f"[parse] {index}/{len(sources)} parse {source.name}")
         try:
             document = parse_document(source, str(source), mineru_backend=settings.mineru_backend)
             duration_ms = int((perf_counter() - started) * 1000)
@@ -448,13 +475,15 @@ def run_retrieval_eval(
     settings: Settings,
     cases: list[EvalCase],
     top_k_override: int | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[list[RetrievalEvalRow], dict[str, object]]:
     rows: list[RetrievalEvalRow] = []
     retrieval_cases = [
         case for case in cases if case.should_retrieve and case.expected_sources and case.intent != "chat"
     ]
 
-    for case in retrieval_cases:
+    for index, case in enumerate(retrieval_cases, start=1):
+        report_progress(progress_callback, f"[retrieval] {index}/{len(retrieval_cases)} {case.case_id}")
         top_k = top_k_override or case.top_k
         rule_intent = detect_intent(case.question)
         llm_intent = classify_intent_with_llm(
@@ -562,13 +591,15 @@ def run_answer_eval(
     settings: Settings,
     cases: list[EvalCase],
     top_k_override: int | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[list[AnswerEvalRow], dict[str, object]]:
     rows: list[AnswerEvalRow] = []
     generation_mode = "llm" if settings.inference_api_key and settings.inference_model else "fallback"
 
     from fabagent_rag.rag_service import answer_question
 
-    for case in cases:
+    for index, case in enumerate(cases, start=1):
+        report_progress(progress_callback, f"[answer] {index}/{len(cases)} {case.case_id}")
         top_k = top_k_override or case.top_k
         try:
             result = answer_question(settings, case.question, top_k)
@@ -883,6 +914,11 @@ def validate_stages(stages: tuple[str, ...]) -> None:
         invalid_names = ", ".join(invalid)
         allowed_names = ", ".join(ALLOWED_STAGES)
         raise ValueError(f"未知评测阶段：{invalid_names}。可选值：{allowed_names}")
+
+
+def report_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback:
+        progress_callback(message)
 
 
 def load_intermediate_parsed_docs(
